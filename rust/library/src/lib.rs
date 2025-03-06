@@ -1,1 +1,3 @@
-pub mod library;
+mod library;
+
+pub use library::*;

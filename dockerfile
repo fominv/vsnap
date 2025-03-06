@@ -8,9 +8,11 @@ RUN cargo build --release -p volsnap-runner
  
 FROM alpine:3.21.3
 
+RUN apk add --no-cache zstd
+
 WORKDIR /app
 
 COPY --from=builder /app/target/release/volsnap-runner .
 
-CMD ["./volsnap-runner"]
+ENTRYPOINT ["./volsnap-runner"]
  
