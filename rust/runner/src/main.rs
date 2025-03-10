@@ -5,7 +5,7 @@ use std::fs::File;
 use anyhow::Result;
 use clap::Parser;
 use tar::{Archive, Builder};
-use volsnap_library::cli::{Cli, Commands};
+use vsnap_library::cli::{Cli, Commands};
 use zstd::Encoder;
 
 fn main() -> Result<()> {
@@ -41,8 +41,10 @@ fn main() -> Result<()> {
                 true => {
                     let snapshot_path = source.join("snapshot.tar.zst");
                     let snapshot_file = File::open(&snapshot_path)?;
+
                     let mut decoder = zstd::Decoder::new(snapshot_file)?;
                     let mut archive = Archive::new(&mut decoder);
+
                     archive.unpack(&target)?;
                 }
                 false => {

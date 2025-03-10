@@ -1,5 +1,5 @@
 [package]
-name = "volsnap-library"
+name = "vsnap-library"
 version = "1.0.0"
 edition = "2024"
 
