@@ -20,7 +20,7 @@ async fn main() -> Result<()> {
     match args.command {
         Commands::Create {
             volume_name,
-            compression,
+            compress,
             snapshot_name,
         } => {
             let docker = Docker::connect_with_local_defaults()?;
@@ -73,8 +73,8 @@ async fn main() -> Result<()> {
                 "snapshot",
             ];
 
-            if compression {
-                cmd.push("--compression");
+            if compress {
+                cmd.push("--compress");
             }
 
             // let cmd = vec!["/mnt/source"];

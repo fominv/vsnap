@@ -16,7 +16,7 @@ pub enum Commands {
     Create {
         /// Whether to compress the snapshot.
         #[arg(long, short, default_value_t = false)]
-        compression: bool,
+        compress: bool,
 
         /// Name of the volume to snapshot.
         volume_name: String,
