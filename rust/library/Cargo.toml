@@ -1,7 +1,0 @@
-[package]
-name = "vsnap-library"
-version = "1.0.0"
-edition = "2024"
-
-[dependencies]
-clap = { version = "4.5.31", features = ["derive"] }

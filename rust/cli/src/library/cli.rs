@@ -14,8 +14,15 @@ pub struct Cli {
 pub enum Commands {
     /// Create a snapshot of a Docker volume.
     Create {
+        /// Whether to compress the snapshot.
+        #[arg(long, short, default_value_t = false)]
+        compression: bool,
+
         /// Name of the volume to snapshot.
         volume_name: String,
+
+        /// Name of the snapshot.
+        snapshot_name: String,
     },
     /// List all snapshots.
     List,
