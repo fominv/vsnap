@@ -53,7 +53,6 @@ pub async fn snapshot(
 
     let container_name = format!("vsnap-{}", chrono::Utc::now().timestamp());
 
-    // TODO: Make sure the container is removed at the end.
     let options = Some(CreateContainerOptions {
         name: container_name.clone(),
         platform: None,
