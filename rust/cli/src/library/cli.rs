@@ -9,9 +9,11 @@ use crate::library::docker::{setup_snapshot_volume, snapshot, verify_source_volu
     name = "vs",
     bin_name = "vs", 
     version = VERSION,
-    about = indoc::indoc! {"Docker Volume Snapshot Tool
+    about = indoc::indoc! {
+        "vsnap - a docker volume snapshot tool
 
-        If you find this tool useful, feel free to star the repository on GitHub: https://github.com/fominv/vsnap.git"}
+        If you find this tool useful, feel free to ⭐ the repository on GitHub: https://github.com/fominv/vsnap.git"
+    }
 )]
 pub struct Cli {
     #[command(subcommand)]
