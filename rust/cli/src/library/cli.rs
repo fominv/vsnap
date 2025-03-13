@@ -1,8 +1,13 @@
+use anyhow::anyhow;
 use bollard::Docker;
 use clap::{Parser, Subcommand};
 use vsnap_library::VERSION;
 
-use crate::library::docker::{setup_snapshot_volume, snapshot, verify_source_volume};
+use crate::library::docker::{
+    create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
+    find_snapshot_volume_names, get_snapshot_volume_name, restore_snapshot, snapshot,
+    strip_snapshot_prefix, verify_snapshot, verify_source_volume,
+};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -39,11 +44,18 @@ pub enum Commands {
     List,
     /// Restore a volume from a snapshot.
     Restore {
-        /// Name of the snapshot to restore.
+        /// Drop after restore.
+        #[arg(long, short, default_value_t = false)]
+        drop: bool,
+
+        /// Name of the snapshot volume to restore.
         snapshot_name: String,
+
+        /// Name of the volume to restore to.
+        restore_volume_name: String,
     },
-    /// Delete a snapshot.
-    Delete {
+    /// Drop a snapshot.
+    Drop {
         /// Name of the snapshot to delete.
         snapshot_name: String,
     },
@@ -54,21 +66,22 @@ pub async fn run() -> anyhow::Result<()> {
 
     match args.command {
         Commands::Create {
-            source_volume_name,
             compress,
+            source_volume_name,
             snapshot_name,
         } => create(source_volume_name, snapshot_name, compress).await?,
         Commands::List => {
-            println!("Listing all snapshots...");
-            // TODO: Implement snapshot listing logic.
+            list().await?;
         }
-        Commands::Restore { snapshot_name } => {
-            println!("Restoring volume from snapshot: {}", snapshot_name);
-            // TODO: Implement snapshot restoration logic.
+        Commands::Restore {
+            drop,
+            snapshot_name,
+            restore_volume_name,
+        } => {
+            restore(snapshot_name, restore_volume_name, drop).await?;
         }
-        Commands::Delete { snapshot_name } => {
-            println!("Deleting snapshot: {}", snapshot_name);
-            // TODO: Implement snapshot deletion logic.
+        Commands::Drop { snapshot_name } => {
+            drop(snapshot_name).await?;
         }
     }
 
@@ -82,11 +95,14 @@ async fn create(
 ) -> anyhow::Result<()> {
     let docker = Docker::connect_with_local_defaults()?;
 
+    verify_snapshot(&docker, &snapshot_name).await?;
+
     let snapshot_volume_name =
         get_snapshot_volume_name(chrono::Utc::now().timestamp(), &snapshot_name);
 
     verify_source_volume(&docker, &source_volume_name).await?;
-    setup_snapshot_volume(&docker, &snapshot_volume_name).await?;
+    create_volume(&docker, &snapshot_volume_name).await?;
+
     snapshot(
         &docker,
         &source_volume_name,
@@ -98,6 +114,58 @@ async fn create(
     Ok(())
 }
 
-fn get_snapshot_volume_name(timestamp: i64, name: &str) -> String {
-    format!("vsnap-{}-{}", timestamp, name)
+async fn list() -> anyhow::Result<()> {
+    let docker = Docker::connect_with_local_defaults()?;
+
+    let mut volume_names = find_snapshot_volume_names(&docker).await?;
+    volume_names.sort();
+
+    if volume_names.is_empty() {
+        println!("No snapshots found.");
+        return Ok(());
+    }
+
+    println!("Snapshots: <volume_name> - <snapshot_name>");
+
+    for volume_name in volume_names {
+        println!("{} - {}", volume_name, strip_snapshot_prefix(&volume_name)?);
+    }
+
+    Ok(())
+}
+
+async fn restore(
+    snapshot_name: String,
+    restore_volume_name: String,
+    drop: bool,
+) -> anyhow::Result<()> {
+    let docker = Docker::connect_with_local_defaults()?;
+
+    let snapshot_volume_name = find_snapshot_volume_name_by_snapshot_name(&docker, &snapshot_name)
+        .await?
+        .ok_or(anyhow!("Snapshot not found: {}", snapshot_name))?;
+
+    // TODO: Confirm drop.
+    drop_volume(&docker, &restore_volume_name).await?;
+    create_volume(&docker, &restore_volume_name).await?;
+
+    restore_snapshot(&docker, &snapshot_volume_name, &restore_volume_name).await?;
+
+    if drop {
+        drop_volume(&docker, &snapshot_volume_name).await?;
+    }
+
+    Ok(())
+}
+
+async fn drop(snapshot_name: String) -> anyhow::Result<()> {
+    let docker = Docker::connect_with_local_defaults()?;
+
+    let snapshot_volume_name = find_snapshot_volume_name_by_snapshot_name(&docker, &snapshot_name)
+        .await?
+        .ok_or(anyhow!("Snapshot not found: {}", snapshot_name))?;
+
+    drop_volume(&docker, &snapshot_volume_name).await?;
+
+    Ok(())
 }
