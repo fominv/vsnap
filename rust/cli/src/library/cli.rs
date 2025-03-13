@@ -1,12 +1,18 @@
 use bollard::Docker;
 use clap::{Parser, Subcommand};
+use vsnap_library::VERSION;
 
 use crate::library::docker::{setup_snapshot_volume, snapshot, verify_source_volume};
 
-/// A CLI tool for managing Docker volume snapshots.
 #[derive(Parser, Debug)]
-#[command(name = "vs")]
-#[command(about = "Docker Volume Snapshot Tool", long_about = None)]
+#[command(
+    name = "vs",
+    bin_name = "vs", 
+    version = VERSION,
+    about = indoc::indoc! {"Docker Volume Snapshot Tool
+
+        If you find this tool useful, feel free to star the repository on GitHub: https://github.com/fominv/vsnap.git"}
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

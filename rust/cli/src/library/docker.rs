@@ -6,6 +6,7 @@ use bollard::{
     volume::CreateVolumeOptions,
 };
 use futures::StreamExt;
+use vsnap_library::VERSION;
 
 pub async fn verify_source_volume(docker: &Docker, source_volume_name: &str) -> anyhow::Result<()> {
     // Check if the volume exists.
@@ -85,9 +86,9 @@ pub async fn snapshot(
         ..Default::default()
     };
 
-    // TODO: Fix the version in the binary
+    let image = format!("vsnap:{}", VERSION);
     let config = Config {
-        image: Some("vsnap:latest"),
+        image: Some(image.as_str()),
         cmd: Some(cmd),
         host_config: Some(host_config),
         // TODO: Add tty support

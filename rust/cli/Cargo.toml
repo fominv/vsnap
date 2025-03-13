@@ -1,6 +1,6 @@
 [package]
 name = "vsnap-cli"
-version = "1.0.0"
+version = "0.0.0"
 edition = "2024"
 
 [dependencies]
@@ -9,5 +9,7 @@ bollard = "0.18.1"
 chrono = "0.4.40"
 clap = { version = "4.5.31", features = ["derive"] }
 futures = "0.3.31"
+indoc = "2.0.6"
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.44.0", features = ["rt-multi-thread", "macros"] }
+vsnap-library = { path = "../library" }
