@@ -6,14 +6,15 @@ use vsnap_library::VERSION;
 use crate::library::docker::{
     create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
     find_snapshot_volume_names, get_snapshot_volume_name, restore_snapshot, snapshot,
-    strip_snapshot_prefix, verify_snapshot, verify_source_volume,
+    strip_snapshot_prefix, verify_snapshot_does_not_exist, verify_volume_exists,
+    verify_volume_not_in_use,
 };
 
 #[derive(Parser, Debug)]
 #[command(
     name = "vs",
     bin_name = "vs", 
-    version = VERSION,
+    version = VERSION.as_str(),
     about = indoc::indoc! {
         "vsnap - a docker volume snapshot tool
 
@@ -95,12 +96,14 @@ async fn create(
 ) -> anyhow::Result<()> {
     let docker = Docker::connect_with_local_defaults()?;
 
-    verify_snapshot(&docker, &snapshot_name).await?;
+    verify_snapshot_does_not_exist(&docker, &snapshot_name).await?;
 
     let snapshot_volume_name =
         get_snapshot_volume_name(chrono::Utc::now().timestamp(), &snapshot_name);
 
-    verify_source_volume(&docker, &source_volume_name).await?;
+    verify_volume_not_in_use(&docker, &source_volume_name).await?;
+    verify_volume_exists(&docker, &source_volume_name).await?;
+
     create_volume(&docker, &snapshot_volume_name).await?;
 
     snapshot(
@@ -143,9 +146,9 @@ async fn restore(
 
     let snapshot_volume_name = find_snapshot_volume_name_by_snapshot_name(&docker, &snapshot_name)
         .await?
-        .ok_or(anyhow!("Snapshot not found: {}", snapshot_name))?;
+        .ok_or(anyhow!("Snapshot {} not found", snapshot_name))?;
 
-    // TODO: Confirm drop.
+    // TODO: Confirm drop and restore mount points.
     drop_volume(&docker, &restore_volume_name).await?;
     create_volume(&docker, &restore_volume_name).await?;
 
@@ -163,7 +166,7 @@ async fn drop(snapshot_name: String) -> anyhow::Result<()> {
 
     let snapshot_volume_name = find_snapshot_volume_name_by_snapshot_name(&docker, &snapshot_name)
         .await?
-        .ok_or(anyhow!("Snapshot not found: {}", snapshot_name))?;
+        .ok_or(anyhow!("Snapshot {} not found", snapshot_name))?;
 
     drop_volume(&docker, &snapshot_volume_name).await?;
 

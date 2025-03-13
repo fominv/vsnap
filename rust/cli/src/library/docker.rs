@@ -3,7 +3,10 @@ use std::{collections::HashMap, str};
 use anyhow::anyhow;
 use bollard::{
     Docker,
-    container::{Config, CreateContainerOptions, StartContainerOptions, WaitContainerOptions},
+    container::{
+        Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
+        WaitContainerOptions,
+    },
     secret::{HostConfig, Mount},
     volume::{CreateVolumeOptions, ListVolumesOptions},
 };
@@ -18,7 +21,43 @@ pub fn get_snapshot_volume_name(timestamp: i64, name: &str) -> String {
     format!("vsnap-{}-{}", timestamp, name)
 }
 
-pub async fn verify_snapshot(docker: &Docker, snapshot_name: &str) -> anyhow::Result<()> {
+pub async fn verify_volume_not_in_use(docker: &Docker, volume_name: &str) -> anyhow::Result<()> {
+    let containers = docker
+        .list_containers(Some(ListContainersOptions::<&str> {
+            all: true,
+            filters: HashMap::<&str, Vec<&str>>::from([("volume", vec![volume_name])]),
+            ..Default::default()
+        }))
+        .await?;
+
+    let container_names = containers
+        .iter()
+        .filter_map(|container| {
+            container
+                .names
+                .iter()
+                .flatten()
+                .next()
+                .map(|name| name.strip_prefix("/"))
+                .flatten()
+                .map(|name| name.to_string())
+        })
+        .collect::<Vec<String>>();
+
+    if container_names.len() > 0 {
+        return Err(anyhow!(
+            "Volume is in use by {}",
+            container_names.join(", ")
+        ));
+    }
+
+    Ok(())
+}
+
+pub async fn verify_snapshot_does_not_exist(
+    docker: &Docker,
+    snapshot_name: &str,
+) -> anyhow::Result<()> {
     if find_snapshot_volume_name_by_snapshot_name(&docker, snapshot_name)
         .await?
         .is_some()
@@ -29,20 +68,13 @@ pub async fn verify_snapshot(docker: &Docker, snapshot_name: &str) -> anyhow::Re
     Ok(())
 }
 
-pub async fn verify_source_volume(docker: &Docker, source_volume_name: &str) -> anyhow::Result<()> {
-    // Check if the volume exists.
-    let volume = match docker.inspect_volume(&source_volume_name).await.ok() {
-        Some(volume) => volume,
-        None => {
-            return Err(anyhow!("Volume {} does not exist.", source_volume_name));
-        }
-    };
+pub async fn volume_exists(docker: &Docker, volume_name: &str) -> bool {
+    docker.inspect_volume(&volume_name).await.ok().is_some()
+}
 
-    // Check if the volume is in use.
-    if let Some(usage) = volume.usage_data {
-        if usage.ref_count > 0 {
-            return Err(anyhow!("Volume {} is in use.", source_volume_name));
-        }
+pub async fn verify_volume_exists(docker: &Docker, volume_name: &str) -> anyhow::Result<()> {
+    if !volume_exists(docker, volume_name).await {
+        return Err(anyhow!("Volume does not exist: {}", volume_name));
     }
 
     Ok(())
@@ -60,10 +92,11 @@ pub async fn create_volume(docker: &Docker, volume_name: &str) -> anyhow::Result
 }
 
 pub async fn drop_volume(docker: &Docker, volume_name: &str) -> anyhow::Result<()> {
-    if docker.inspect_volume(&volume_name).await.ok().is_none() {
+    if !volume_exists(docker, volume_name).await {
         return Ok(());
     }
 
+    verify_volume_not_in_use(docker, volume_name).await?;
     docker.remove_volume(volume_name, None).await?;
 
     Ok(())
@@ -117,11 +150,11 @@ pub async fn find_snapshot_volume_name_by_snapshot_name(
 
 async fn run_command(
     docker: &Docker,
-    container_name: &str,
     cmd: Vec<&str>,
     host_config: HostConfig,
 ) -> anyhow::Result<()> {
-    let image = format!("vsnap:{}", VERSION);
+    let container_name = format!("vsnap-{}", chrono::Utc::now().timestamp());
+    let image = format!("vsnap:{}", VERSION.as_str());
 
     let options = Some(CreateContainerOptions {
         name: container_name.to_string(),
@@ -135,6 +168,8 @@ async fn run_command(
         // TODO: Add tty support
         ..Default::default()
     };
+
+    // TODO: Pull image if it doesn't exist
 
     match (async || {
         docker.create_container(options, config).await?;
@@ -169,8 +204,6 @@ pub async fn snapshot(
     const SOURCE_DIR: &str = "/mnt/source";
     const SNAPSHOT_DIR: &str = "/mnt/snapshot";
 
-    let container_name = format!("vsnap-{}", chrono::Utc::now().timestamp());
-
     let mut cmd = vec!["snapshot"];
 
     if compress {
@@ -198,7 +231,7 @@ pub async fn snapshot(
         ..Default::default()
     };
 
-    run_command(docker, &container_name, cmd, host_config).await
+    run_command(docker, cmd, host_config).await
 }
 
 pub async fn restore_snapshot(
@@ -208,8 +241,6 @@ pub async fn restore_snapshot(
 ) -> anyhow::Result<()> {
     const SNAPSHOT_DIR: &str = "/mnt/snapshot";
     const RESTORE_DIR: &str = "/mnt/restore";
-
-    let container_name = format!("vsnap-{}", chrono::Utc::now().timestamp());
 
     let mut cmd = vec!["restore"];
 
@@ -234,7 +265,7 @@ pub async fn restore_snapshot(
         ..Default::default()
     };
 
-    run_command(docker, &container_name, cmd, host_config).await?;
+    run_command(docker, cmd, host_config).await?;
 
     Ok(())
 }
