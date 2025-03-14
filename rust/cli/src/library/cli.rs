@@ -16,8 +16,8 @@ use crate::library::{
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "vs",
-    bin_name = "vs", 
+    name = "vsnap",
+    bin_name = "vsnap", 
     version = VERSION.as_str(),
     about = indoc::indoc! {
         "vsnap - a docker volume snapshot tool

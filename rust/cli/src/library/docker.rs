@@ -7,6 +7,7 @@ use bollard::{
         Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
         WaitContainerOptions,
     },
+    image::CreateImageOptions,
     secret::{HostConfig, Mount},
     volume::{CreateVolumeOptions, ListVolumesOptions},
 };
@@ -187,13 +188,35 @@ pub async fn find_snapshot_volume_name_by_snapshot_name(
     })
 }
 
+pub async fn image_exists(docker: &Docker, image: &str) -> bool {
+    docker.inspect_image(image).await.ok().is_some()
+}
+
+pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
+    // Add a progress bar
+
+    docker
+        .create_image(
+            Some(CreateImageOptions {
+                from_image: image,
+                ..Default::default()
+            }),
+            None,
+            None,
+        )
+        .for_each(async |_| {})
+        .await;
+
+    Ok(())
+}
+
 async fn run_command(
     docker: &Docker,
     cmd: Vec<&str>,
     host_config: HostConfig,
 ) -> anyhow::Result<()> {
     let container_name = format!("vsnap-{}", chrono::Utc::now().timestamp());
-    let image = format!("vsnap:{}", VERSION.as_str());
+    let image = format!("fominv/vsnap:{}", VERSION.as_str());
 
     let options = Some(CreateContainerOptions {
         name: container_name.to_string(),
@@ -208,7 +231,9 @@ async fn run_command(
         ..Default::default()
     };
 
-    // TODO: Pull image if it doesn't exist
+    if !image_exists(docker, &image).await {
+        pull_image(docker, &image).await?;
+    }
 
     match (async || {
         docker.create_container(options, config).await?;
