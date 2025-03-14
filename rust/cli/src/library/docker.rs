@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str, sync::LazyLock};
+use std::{collections::HashMap, str, sync::LazyLock, time::Duration};
 
 use anyhow::anyhow;
 use bollard::{
@@ -13,6 +13,7 @@ use bollard::{
 };
 use chrono::Local;
 use futures::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use regex::Regex;
 use vsnap_library::VERSION;
@@ -193,7 +194,20 @@ pub async fn image_exists(docker: &Docker, image: &str) -> bool {
 }
 
 pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
-    // Add a progress bar
+    let pb = ProgressBar::new_spinner();
+    pb.set_message("Downloading & Extracting Image...");
+    pb.enable_steady_tick(Duration::from_millis(120));
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} {msg}")?.tick_strings(&[
+            "▹▹▹▹▹",
+            "▸▹▹▹▹",
+            "▹▸▹▹▹",
+            "▹▹▸▹▹",
+            "▹▹▹▸▹",
+            "▹▹▹▹▸",
+            "▪▪▪▪▪",
+        ]),
+    );
 
     docker
         .create_image(
@@ -204,8 +218,12 @@ pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
             None,
             None,
         )
-        .for_each(async |_| {})
+        .for_each(async |v| {
+            println!("{:?}", v);
+        })
         .await;
+
+    pb.finish_with_message("Done");
 
     Ok(())
 }
