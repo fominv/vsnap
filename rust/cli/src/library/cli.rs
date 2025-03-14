@@ -1,13 +1,14 @@
 use anyhow::anyhow;
 use bollard::Docker;
 use clap::{Parser, Subcommand};
+use inquire::Confirm;
 use vsnap_library::VERSION;
 
 use crate::library::docker::{
     create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
     find_snapshot_volume_names, get_snapshot_volume_name, restore_snapshot, snapshot,
     strip_snapshot_prefix, verify_snapshot_does_not_exist, verify_volume_exists,
-    verify_volume_not_in_use,
+    verify_volume_not_in_use, volume_exists,
 };
 
 #[derive(Parser, Debug)]
@@ -148,10 +149,18 @@ async fn restore(
         .await?
         .ok_or(anyhow!("Snapshot {} not found", snapshot_name))?;
 
-    // TODO: Confirm drop and restore mount points.
-    drop_volume(&docker, &restore_volume_name).await?;
-    create_volume(&docker, &restore_volume_name).await?;
+    if volume_exists(&docker, &restore_volume_name).await {
+        let ans = Confirm::new("The volume to restore to already exists, do you wish to drop it?")
+            .with_default(false)
+            .with_help_message("This will delete the volume and all its data.")
+            .prompt();
 
+        if ans? {
+            drop_volume(&docker, &restore_volume_name).await?;
+        }
+    }
+
+    create_volume(&docker, &restore_volume_name).await?;
     restore_snapshot(&docker, &snapshot_volume_name, &restore_volume_name).await?;
 
     if drop {

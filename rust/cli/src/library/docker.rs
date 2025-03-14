@@ -92,10 +92,6 @@ pub async fn create_volume(docker: &Docker, volume_name: &str) -> anyhow::Result
 }
 
 pub async fn drop_volume(docker: &Docker, volume_name: &str) -> anyhow::Result<()> {
-    if !volume_exists(docker, volume_name).await {
-        return Ok(());
-    }
-
     verify_volume_not_in_use(docker, volume_name).await?;
     docker.remove_volume(volume_name, None).await?;
 
