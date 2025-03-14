@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use bollard::{
     Docker,
     container::{
-        Config, CreateContainerOptions, ListContainersOptions, StartContainerOptions,
+        Config, CreateContainerOptions, ListContainersOptions, LogsOptions, StartContainerOptions,
         WaitContainerOptions,
     },
     image::CreateImageOptions,
@@ -16,6 +16,7 @@ use futures::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use itertools::Itertools;
 use regex::Regex;
+use tokio::io::{self, AsyncWriteExt};
 use vsnap_library::VERSION;
 
 pub static SNAPSHOT_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| {
@@ -245,7 +246,6 @@ async fn run_command(
         image: Some(image.as_str()),
         cmd: Some(cmd),
         host_config: Some(host_config),
-        // TODO: Add tty support
         ..Default::default()
     };
 
@@ -259,6 +259,31 @@ async fn run_command(
         docker
             .start_container(&container_name, None::<StartContainerOptions<String>>)
             .await?;
+
+        docker
+            .logs(
+                &container_name,
+                Some(LogsOptions::<String> {
+                    follow: true,
+                    stdout: true,
+                    stderr: true,
+                    ..Default::default()
+                }),
+            )
+            .for_each(async |v| {
+                if let Ok(v) = v {
+                    match v {
+                        bollard::container::LogOutput::StdOut { message } => {
+                            io::stdout().write_all(&message).await.ok();
+                        }
+                        bollard::container::LogOutput::StdErr { message } => {
+                            io::stderr().write_all(&message).await.ok();
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .await;
 
         docker
             .wait_container(&container_name, None::<WaitContainerOptions<String>>)

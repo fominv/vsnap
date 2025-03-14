@@ -1,19 +1,16 @@
-use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
-use anyhow::Result;
 use std::{fs::File, path::Path};
+
+use anyhow::Result;
 use tar::{Archive, Builder};
 use zstd::Encoder;
+
+use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
 
 pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
     match compress {
         true => {
-            println!("Compressing snapshot...");
             let tar_file = File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST))?;
 
-            println!(
-                "Creating tarball... {:?}",
-                &snapshot_path.join(SNAPSHOT_TAR_ZST)
-            );
             let mut encoder = Encoder::new(tar_file, 0)?.auto_finish();
             let mut tar_builder = Builder::new(&mut encoder);
 
