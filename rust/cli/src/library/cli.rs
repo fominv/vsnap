@@ -4,11 +4,14 @@ use clap::{Parser, Subcommand};
 use inquire::Confirm;
 use vsnap_library::VERSION;
 
-use crate::library::docker::{
-    create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
-    find_snapshot_volume_names, get_snapshot_volume_name, restore_snapshot, snapshot,
-    strip_snapshot_prefix, verify_snapshot_does_not_exist, verify_volume_exists,
-    verify_volume_not_in_use, volume_exists,
+use crate::library::{
+    docker::{
+        create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
+        find_snapshot_volume_names, get_snapshot_volume_name, get_volume_sizes_for_volume_names,
+        restore_snapshot, snapshot, verify_snapshot_does_not_exist, verify_volume_exists,
+        verify_volume_not_in_use, volume_exists,
+    },
+    table::print_snapshot_table,
 };
 
 #[derive(Parser, Debug)]
@@ -43,7 +46,12 @@ pub enum Commands {
         snapshot_name: String,
     },
     /// List all snapshots.
-    List,
+    List {
+        /// Include snapshot sizes.
+        /// Might be slow for many / large volumes.
+        #[arg(long, short, default_value_t = false)]
+        size: bool,
+    },
     /// Restore a volume from a snapshot.
     Restore {
         /// Drop after restore.
@@ -72,8 +80,8 @@ pub async fn run() -> anyhow::Result<()> {
             source_volume_name,
             snapshot_name,
         } => create(source_volume_name, snapshot_name, compress).await?,
-        Commands::List => {
-            list().await?;
+        Commands::List { size } => {
+            list(size).await?;
         }
         Commands::Restore {
             drop,
@@ -118,22 +126,23 @@ async fn create(
     Ok(())
 }
 
-async fn list() -> anyhow::Result<()> {
+async fn list(include_size: bool) -> anyhow::Result<()> {
     let docker = Docker::connect_with_local_defaults()?;
 
     let mut volume_names = find_snapshot_volume_names(&docker).await?;
     volume_names.sort();
+
+    let volume_sizes = match include_size {
+        true => Some(get_volume_sizes_for_volume_names(&docker, &volume_names).await?),
+        false => None,
+    };
 
     if volume_names.is_empty() {
         println!("No snapshots found.");
         return Ok(());
     }
 
-    println!("Snapshots: <volume_name> - <snapshot_name>");
-
-    for volume_name in volume_names {
-        println!("{} - {}", volume_name, strip_snapshot_prefix(&volume_name)?);
-    }
+    print_snapshot_table(volume_names, volume_sizes)?;
 
     Ok(())
 }

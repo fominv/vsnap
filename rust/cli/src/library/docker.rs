@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str};
+use std::{collections::HashMap, str, sync::LazyLock};
 
 use anyhow::anyhow;
 use bollard::{
@@ -10,12 +10,15 @@ use bollard::{
     secret::{HostConfig, Mount},
     volume::{CreateVolumeOptions, ListVolumesOptions},
 };
+use chrono::Local;
 use futures::StreamExt;
 use itertools::Itertools;
 use regex::Regex;
 use vsnap_library::VERSION;
 
-static SNAPSHOT_PREFIX_REGEX: &str = r"^vsnap-\d{10,}-";
+pub static SNAPSHOT_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^vsnap-(\d{10,})-").expect("Failed to compile snapshot prefix regex")
+});
 
 pub fn get_snapshot_volume_name(timestamp: i64, name: &str) -> String {
     format!("vsnap-{}-{}", timestamp, name)
@@ -105,23 +108,65 @@ pub async fn find_snapshot_volume_names(docker: &Docker) -> anyhow::Result<Vec<S
         }))
         .await?;
 
-    let re = Regex::new(SNAPSHOT_PREFIX_REGEX)?;
-
     Ok(volumes
         .volumes
         .map(|volumes| {
             volumes
                 .into_iter()
-                .filter(|volume| re.is_match(&volume.name))
+                .filter(|volume| SNAPSHOT_PREFIX_REGEX.is_match(&volume.name))
                 .map(|v| v.name)
                 .collect::<Vec<String>>()
         })
         .unwrap_or(vec![]))
 }
 
-pub fn strip_snapshot_prefix(volume_name: &str) -> anyhow::Result<String> {
-    let re = Regex::new(SNAPSHOT_PREFIX_REGEX)?;
-    Ok(re.replace(volume_name, "").to_string())
+pub enum VolumeSize {
+    Bytes(i64),
+    Unavailable,
+}
+
+pub async fn get_volume_sizes_for_volume_names(
+    docker: &Docker,
+    volume_names: &Vec<String>,
+) -> anyhow::Result<HashMap<String, VolumeSize>> {
+    let mut volume_sizes = HashMap::new();
+
+    let df = docker.df().await?;
+    for volume in df.volumes.unwrap_or(vec![]) {
+        if !volume_names.contains(&volume.name) {
+            continue;
+        }
+
+        let size = volume
+            .usage_data
+            .map(|usage_data| VolumeSize::Bytes(usage_data.size))
+            .unwrap_or(VolumeSize::Unavailable);
+
+        volume_sizes.insert(volume.name, size);
+    }
+
+    Ok(volume_sizes)
+}
+
+pub fn extract_snapshot_datetime(volume_name: &str) -> anyhow::Result<chrono::NaiveDateTime> {
+    let captures = SNAPSHOT_PREFIX_REGEX.captures(volume_name).ok_or(anyhow!(
+        "Failed to extract timestamp from volume name: {}",
+        volume_name
+    ))?;
+
+    let timestamp = captures.get(1).unwrap().as_str().parse::<i64>()?;
+
+    Ok(chrono::DateTime::from_timestamp(timestamp, 0)
+        .ok_or(anyhow!(
+            "Failed to parse timestamp from volume name: {}",
+            volume_name
+        ))?
+        .with_timezone(&Local)
+        .naive_local())
+}
+
+pub fn strip_snapshot_prefix(volume_name: &str) -> String {
+    SNAPSHOT_PREFIX_REGEX.replace(volume_name, "").to_string()
 }
 
 pub async fn find_snapshot_volume_name_by_snapshot_name(
@@ -130,11 +175,9 @@ pub async fn find_snapshot_volume_name_by_snapshot_name(
 ) -> anyhow::Result<Option<String>> {
     let volume_names = find_snapshot_volume_names(docker).await?;
 
-    let volume_names = volume_names.into_iter().filter(|volume_name| {
-        strip_snapshot_prefix(&volume_name)
-            .map(|x| x == snapshot_name)
-            .unwrap_or(false)
-    });
+    let volume_names = volume_names
+        .into_iter()
+        .filter(|volume_name| strip_snapshot_prefix(&volume_name) == snapshot_name);
 
     volume_names.at_most_one().map_err(|_| {
         anyhow!(
