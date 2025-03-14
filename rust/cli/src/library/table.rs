@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use console::style;
 use tabled::builder::Builder;
 
 use crate::library::docker::{VolumeSize, extract_snapshot_datetime, strip_snapshot_prefix};
@@ -15,6 +16,11 @@ pub fn print_snapshot_table(
     }
 
     header.push("Volume Name");
+
+    let header = header
+        .iter()
+        .map(|s| style(s).green().bold().to_string())
+        .collect::<Vec<String>>();
 
     let mut builder = Builder::default();
     builder.push_record(header);
