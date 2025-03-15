@@ -1,0 +1,11 @@
+services:
+  debian:
+    image: debian:bookworm-slim
+    volumes:
+      - ./dump:/mnt/local
+      - test-volume:/mnt/volume
+    command: sh -c "chmod -R 777 /mnt && sleep infinity"
+
+volumes:
+  test-volume:
+    name: test-volume
