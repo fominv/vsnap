@@ -13,7 +13,7 @@ use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
 
 pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
     let total_size = calculate_total_size(source_path)?;
-    let pb = create_progress_bar(total_size);
+    let pb = create_progress_bar(total_size)?;
 
     match compress {
         true => {
@@ -23,7 +23,7 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
             let mut encoder = Encoder::new(buffered_writer, 0)?.auto_finish();
             let mut tar_builder = Builder::new(ProgressWriter::new(&mut encoder, &pb));
 
-            for entry in walkdir::WalkDir::new(source_path) {
+            for entry in walkdir::WalkDir::new(source_path).follow_links(false) {
                 let entry = entry?;
                 let relative_path = entry.path().strip_prefix(source_path)?;
 
@@ -31,16 +31,15 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
                     continue;
                 }
 
-                let metadata = entry.metadata()?;
+                let file_type = entry.file_type();
 
-                match metadata.is_file() {
-                    true => {
-                        let mut file = File::open(entry.path())?;
-                        tar_builder.append_file(relative_path, &mut file)?;
-                    }
-                    false => {
-                        tar_builder.append_dir(relative_path, entry.path())?;
-                    }
+                if file_type.is_symlink() {
+                    // TODO: Do not follow symlinks
+                } else if file_type.is_dir() {
+                    tar_builder.append_dir(relative_path, entry.path())?;
+                } else if file_type.is_file() {
+                    let mut file = File::open(entry.path())?;
+                    tar_builder.append_file(relative_path, &mut file)?;
                 }
             }
 
@@ -50,22 +49,21 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
             fs::create_dir_all(&files_path)?;
 
-            for entry in walkdir::WalkDir::new(source_path) {
+            for entry in walkdir::WalkDir::new(source_path).follow_links(false) {
                 let entry = entry?;
                 let relative_path = entry.path().strip_prefix(source_path)?;
                 let destination_path = files_path.join(relative_path);
 
-                let metadata = entry.metadata()?;
+                let file_type = entry.file_type();
 
-                match metadata.is_file() {
-                    true => {
-                        let mut source_file = File::open(entry.path())?;
-                        let mut dest_file = File::create(destination_path)?;
-                        copy_with_progress(&mut source_file, &mut dest_file, &pb)?;
-                    }
-                    false => {
-                        fs::create_dir_all(&destination_path)?;
-                    }
+                if file_type.is_symlink() {
+                    // TODO: Do not follow symlinks
+                } else if file_type.is_dir() {
+                    fs::create_dir_all(&destination_path)?;
+                } else if file_type.is_file() {
+                    let mut source_file = File::open(entry.path())?;
+                    let mut dest_file = File::create(&destination_path)?;
+                    copy_with_progress(&mut source_file, &mut dest_file, &pb)?;
                 }
             }
         }
@@ -87,14 +85,14 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
         })?;
 
         let compressed_size = snapshot_file.metadata()?.len();
-        let pb = create_progress_bar(compressed_size);
+        let pb = create_progress_bar(compressed_size)?;
 
         let buffered_reader = std::io::BufReader::new(ProgressReader::new(snapshot_file, &pb));
         let mut decoder =
             Decoder::new(buffered_reader).with_context(|| "Failed to create zstd decoder")?;
 
         let total_size = calculate_uncompressed_size(&mut decoder)?;
-        let pb_unpack = create_progress_bar(total_size);
+        let pb_unpack = create_progress_bar(total_size)?;
 
         let snapshot_file = File::open(&snapshot_file_path)?;
         let buffered_reader = std::io::BufReader::new(ProgressReader::new(snapshot_file, &pb));
@@ -112,22 +110,23 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
         pb.finish_with_message("Decompression complete!");
     } else {
         let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-        let pb = create_progress_bar(calculate_total_size(&files_path)?);
+        let pb = create_progress_bar(calculate_total_size(&files_path)?)?;
 
-        for entry in walkdir::WalkDir::new(&files_path) {
+        for entry in walkdir::WalkDir::new(&files_path).follow_links(false) {
             let entry = entry?;
             let relative_path = entry.path().strip_prefix(&files_path)?;
             let destination_path = restore_path.join(relative_path);
 
-            match entry.file_type().is_file() {
-                true => {
-                    let mut src_file = File::open(entry.path())?;
-                    let mut dest_file = File::create(&destination_path)?;
-                    copy_with_progress(&mut src_file, &mut dest_file, &pb)?;
-                }
-                false => {
-                    fs::create_dir_all(&destination_path)?;
-                }
+            let file_type = entry.file_type();
+
+            if file_type.is_symlink() {
+                // TODO: Do not follow symlinks
+            } else if file_type.is_dir() {
+                fs::create_dir_all(&destination_path)?;
+            } else if file_type.is_file() {
+                let mut src_file = File::open(entry.path())?;
+                let mut dest_file = File::create(&destination_path)?;
+                copy_with_progress(&mut src_file, &mut dest_file, &pb)?;
             }
         }
 
@@ -137,19 +136,21 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn create_progress_bar(total_size: u64) -> ProgressBar {
+fn create_progress_bar(total_size: u64) -> anyhow::Result<ProgressBar> {
     let pb = ProgressBar::new(total_size);
+
     pb.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-            .expect("Failed to create progress bar template") 
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")? 
             .progress_chars("#>-"),
     );
-    pb
+
+    Ok(pb)
 }
 
 fn calculate_total_size(path: &Path) -> Result<u64> {
     let total_size = walkdir::WalkDir::new(path)
+        .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter_map(|e| e.metadata().ok())
