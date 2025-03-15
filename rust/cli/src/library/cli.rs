@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use bollard::Docker;
-use clap::{Parser, Subcommand};
+use clap::{ArgGroup, Parser, Subcommand};
 use inquire::Confirm;
 use vsnap_library::VERSION;
 
@@ -28,6 +28,21 @@ use crate::library::{
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
+}
+
+#[derive(Parser, Debug)]
+#[command(group(
+    ArgGroup::new("target")
+        .required(true)
+        .args(["all", "snapshot_name"])
+))]
+pub struct Drop {
+    /// Drop all snapshots.
+    #[arg(long, short, default_value_t = false)]
+    all: bool,
+
+    /// Name of the snapshot to delete.
+    snapshot_name: Option<String>,
 }
 
 /// Subcommands for the vs tool.
@@ -64,11 +79,9 @@ pub enum Commands {
         /// Name of the volume to restore to.
         restore_volume_name: String,
     },
+
     /// Drop a snapshot.
-    Drop {
-        /// Name of the snapshot to delete.
-        snapshot_name: String,
-    },
+    Drop(Drop),
 }
 
 pub async fn run() -> anyhow::Result<()> {
@@ -90,9 +103,19 @@ pub async fn run() -> anyhow::Result<()> {
         } => {
             restore(snapshot_name, restore_volume_name, drop).await?;
         }
-        Commands::Drop { snapshot_name } => {
-            drop(snapshot_name).await?;
-        }
+        Commands::Drop(Drop { all, snapshot_name }) => match all {
+            true => {
+                let docker = Docker::connect_with_local_defaults()?;
+                let snapshot_volume_names = find_snapshot_volume_names(&docker).await?;
+
+                for snapshot_volume_name in snapshot_volume_names {
+                    drop_volume(&docker, &snapshot_volume_name).await?;
+                }
+            }
+            false => {
+                drop(snapshot_name.ok_or(anyhow!("Snapshot name is required"))?).await?;
+            }
+        },
     }
 
     Ok(())
