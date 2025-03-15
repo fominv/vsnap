@@ -1,78 +1,26 @@
 use std::{
     fs::{self, File},
-    io::{self, BufRead, Read, Write},
+    io::{self, Read, Write},
     path::Path,
 };
 
-use anyhow::{Context, Result};
-use indicatif::{ProgressBar, ProgressStyle};
+use anyhow::Result;
 use tar::{Archive, Builder, EntryType, Header};
-use zstd::{Encoder, stream::read::Decoder};
+use zstd::Encoder;
 
 use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
 
 pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
-    let total_size = calculate_total_size(source_path)?;
-    let pb = create_progress_bar(total_size)?;
+    // let total_size = calculate_total_size(source_path)?;
 
     match compress {
         true => {
             let tar_file = File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST))?;
-
-            let buffered_writer = std::io::BufWriter::new(tar_file);
-            let mut encoder = Encoder::new(buffered_writer, 0)?.auto_finish();
-            let mut tar_builder = Builder::new(ProgressWriter::new(&mut encoder, &pb));
-
-            for entry in walkdir::WalkDir::new(source_path).follow_links(false) {
-                let entry = entry?;
-                let relative_path = entry.path().strip_prefix(source_path)?;
-
-                if relative_path == Path::new("") {
-                    continue;
-                }
-
-                let file_type = entry.file_type();
-
-                if file_type.is_symlink() {
-                    let target = fs::read_link(entry.path())?;
-
-                    let mut header = Header::new_gnu();
-                    header.set_entry_type(EntryType::Symlink);
-                    header.set_size(0);
-
-                    tar_builder.append_link(&mut header, relative_path, target)?;
-                } else if file_type.is_dir() {
-                    tar_builder.append_dir(relative_path, entry.path())?;
-                } else if file_type.is_file() {
-                    let mut file = File::open(entry.path())?;
-                    tar_builder.append_file(relative_path, &mut file)?;
-                }
-            }
-
-            tar_builder.finish()?;
+            compress_dir(source_path, tar_file, |x| {})?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-            fs::create_dir_all(&files_path)?;
-
-            for entry in walkdir::WalkDir::new(source_path).follow_links(false) {
-                let entry = entry?;
-                let relative_path = entry.path().strip_prefix(source_path)?;
-                let destination_path = files_path.join(relative_path);
-
-                let file_type = entry.file_type();
-
-                if file_type.is_symlink() {
-                    let target = fs::read_link(entry.path())?;
-                    std::os::unix::fs::symlink(&target, &destination_path)?;
-                } else if file_type.is_dir() {
-                    fs::create_dir_all(&destination_path)?;
-                } else if file_type.is_file() {
-                    let mut source_file = File::open(entry.path())?;
-                    let mut dest_file = File::create(&destination_path)?;
-                    copy_with_progress(&mut source_file, &mut dest_file, &pb)?;
-                }
-            }
+            copy_dir(source_path, &files_path, |x| {})?;
         }
     }
 
@@ -82,78 +30,18 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
 pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
     let is_compressed = snapshot_path.join(SNAPSHOT_TAR_ZST).exists();
 
-    if is_compressed {
-        let snapshot_file_path = snapshot_path.join(SNAPSHOT_TAR_ZST);
-        let snapshot_file = File::open(&snapshot_file_path).with_context(|| {
-            format!(
-                "Failed to open snapshot file: {}",
-                snapshot_file_path.display()
-            )
-        })?;
-
-        let compressed_size = snapshot_file.metadata()?.len();
-        let pb = create_progress_bar(compressed_size)?;
-
-        let buffered_reader = std::io::BufReader::new(ProgressReader::new(snapshot_file, &pb));
-        let mut decoder =
-            Decoder::new(buffered_reader).with_context(|| "Failed to create zstd decoder")?;
-
-        let total_size = calculate_uncompressed_size(&mut decoder)?;
-        let pb_unpack = create_progress_bar(total_size)?;
-
-        let snapshot_file = File::open(&snapshot_file_path)?;
-        let buffered_reader = std::io::BufReader::new(ProgressReader::new(snapshot_file, &pb));
-        decoder = Decoder::new(buffered_reader)?;
-
-        let mut archive = Archive::new(ProgressReader::new(&mut decoder, &pb_unpack));
-
-        for entry in archive.entries()? {
-            let mut entry = entry.context("Error reading tar entry")?;
-            let path = restore_path.join(entry.path()?);
-            entry.unpack(&path).context("Error unpacking tar entry")?;
+    match is_compressed {
+        true => {
+            let tar_file = File::open(snapshot_path.join(SNAPSHOT_TAR_ZST))?;
+            decompress_tar(tar_file, restore_path, |x| {})?;
         }
-
-        pb_unpack.finish_with_message("Unpacking complete!");
-        pb.finish_with_message("Decompression complete!");
-    } else {
-        let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-        let pb = create_progress_bar(calculate_total_size(&files_path)?)?;
-
-        for entry in walkdir::WalkDir::new(&files_path).follow_links(false) {
-            let entry = entry?;
-            let relative_path = entry.path().strip_prefix(&files_path)?;
-            let destination_path = restore_path.join(relative_path);
-
-            let file_type = entry.file_type();
-
-            if file_type.is_symlink() {
-                let target = fs::read_link(entry.path())?;
-                std::os::unix::fs::symlink(target, &destination_path)?;
-            } else if file_type.is_dir() {
-                fs::create_dir_all(&destination_path)?;
-            } else if file_type.is_file() {
-                let mut src_file = File::open(entry.path())?;
-                let mut dest_file = File::create(&destination_path)?;
-                copy_with_progress(&mut src_file, &mut dest_file, &pb)?;
-            }
+        false => {
+            let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
+            copy_dir(&files_path, restore_path, |x| {})?;
         }
-
-        pb.finish_with_message("Restore complete!");
     }
 
     Ok(())
-}
-
-fn create_progress_bar(total_size: u64) -> anyhow::Result<ProgressBar> {
-    let pb = ProgressBar::new(total_size);
-
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")? 
-            .progress_chars("#>-"),
-    );
-
-    Ok(pb)
 }
 
 fn calculate_total_size(path: &Path) -> Result<u64> {
@@ -168,29 +56,14 @@ fn calculate_total_size(path: &Path) -> Result<u64> {
     Ok(total_size)
 }
 
-fn calculate_uncompressed_size<R: Read>(decoder: &mut Decoder<'_, R>) -> Result<u64>
-where
-    R: BufRead,
-{
-    let mut buffer = [0; 8192];
-    let mut total_size = 0;
-
-    loop {
-        let bytes_read = decoder.read(&mut buffer)?;
-        total_size += bytes_read as u64;
-        if bytes_read == 0 {
-            break;
-        }
-    }
-
-    Ok(total_size)
-}
-
-fn copy_with_progress<R: Read, W: Write>(
+fn copy_with_progress<R: Read, W: Write, F>(
     reader: &mut R,
     writer: &mut W,
-    pb: &ProgressBar,
-) -> Result<()> {
+    progress_callback: &F,
+) -> Result<()>
+where
+    F: Fn(u64),
+{
     let mut buffer = [0; 8192];
 
     loop {
@@ -201,30 +74,41 @@ fn copy_with_progress<R: Read, W: Write>(
         }
 
         writer.write_all(&buffer[..bytes_read])?;
-        pb.inc(bytes_read as u64);
+        progress_callback(bytes_read as u64);
     }
 
     Ok(())
 }
 
-struct ProgressWriter<'a, W: Write> {
+struct ProgressWriter<W: Write, F>
+where
+    F: Fn(u64),
+{
     inner: W,
-    progress_bar: &'a ProgressBar,
+    progress_callback: F,
 }
 
-impl<'a, W: Write> ProgressWriter<'a, W> {
-    fn new(inner: W, progress_bar: &'a ProgressBar) -> Self {
+impl<W: Write, F> ProgressWriter<W, F>
+where
+    F: Fn(u64),
+{
+    fn new(inner: W, progress_callback: F) -> Self {
         ProgressWriter {
             inner,
-            progress_bar,
+            progress_callback,
         }
     }
 }
 
-impl<'a, W: Write> Write for ProgressWriter<'a, W> {
+impl<W: Write, F> Write for ProgressWriter<W, F>
+where
+    F: Fn(u64),
+{
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let bytes_written = self.inner.write(buf)?;
-        self.progress_bar.inc(bytes_written as u64);
+
+        (self.progress_callback)(bytes_written as u64);
+
         Ok(bytes_written)
     }
 
@@ -233,24 +117,130 @@ impl<'a, W: Write> Write for ProgressWriter<'a, W> {
     }
 }
 
-struct ProgressReader<'a, R: Read> {
+struct ProgressReader<R: Read, F>
+where
+    F: Fn(u64),
+{
     inner: R,
-    progress_bar: &'a ProgressBar,
+    progress_callback: F,
 }
 
-impl<'a, R: Read> ProgressReader<'a, R> {
-    fn new(inner: R, progress_bar: &'a ProgressBar) -> Self {
+impl<R: Read, F> ProgressReader<R, F>
+where
+    F: Fn(u64),
+{
+    fn new(inner: R, progress_callback: F) -> Self {
         ProgressReader {
             inner,
-            progress_bar,
+            progress_callback,
         }
     }
 }
 
-impl<'a, R: Read> Read for ProgressReader<'a, R> {
+impl<R: Read, F> Read for ProgressReader<R, F>
+where
+    F: Fn(u64),
+{
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bytes_read = self.inner.read(buf)?;
-        self.progress_bar.inc(bytes_read as u64);
+
+        (self.progress_callback)(bytes_read as u64);
+
         Ok(bytes_read)
     }
+}
+
+fn compress_dir<F>(
+    dir_to_compress: &Path,
+    tar_file: File,
+    progress_callback: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(u64),
+{
+    let buffered_writer = std::io::BufWriter::new(tar_file);
+    let mut encoder = Encoder::new(buffered_writer, 0)?.auto_finish();
+    let mut tar_builder = Builder::new(ProgressWriter::new(&mut encoder, progress_callback));
+
+    for entry in walkdir::WalkDir::new(dir_to_compress).follow_links(false) {
+        let entry = entry?;
+        let relative_path = entry.path().strip_prefix(dir_to_compress)?;
+
+        if relative_path == Path::new("") {
+            continue;
+        }
+
+        let file_type = entry.file_type();
+
+        if file_type.is_symlink() {
+            let target = fs::read_link(entry.path())?;
+
+            let mut header = Header::new_gnu();
+            header.set_entry_type(EntryType::Symlink);
+            header.set_size(0);
+
+            tar_builder.append_link(&mut header, relative_path, target)?;
+        } else if file_type.is_dir() {
+            tar_builder.append_dir(relative_path, entry.path())?;
+        } else if file_type.is_file() {
+            let mut file = File::open(entry.path())?;
+            tar_builder.append_file(relative_path, &mut file)?;
+        }
+    }
+
+    tar_builder.finish()?;
+
+    Ok(())
+}
+
+fn decompress_tar<F>(
+    tar_file: File,
+    destination_dir: &Path,
+    progress_callback: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(u64),
+{
+    let mut decoder = zstd::Decoder::new(tar_file)?;
+    let mut archive = Archive::new(ProgressReader::new(&mut decoder, progress_callback));
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let path = destination_dir.join(entry.path()?);
+        entry.unpack(&path)?;
+    }
+
+    Ok(())
+}
+
+fn copy_dir<F>(
+    dir_to_copy: &Path,
+    destination_dir: &Path,
+    progress_callback: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(u64),
+{
+    fs::create_dir_all(&destination_dir)?;
+
+    for entry in walkdir::WalkDir::new(dir_to_copy).follow_links(false) {
+        let entry = entry?;
+        let relative_path = entry.path().strip_prefix(dir_to_copy)?;
+        let destination_path = destination_dir.join(relative_path);
+
+        let file_type = entry.file_type();
+
+        if file_type.is_symlink() {
+            let target = fs::read_link(entry.path())?;
+            std::os::unix::fs::symlink(&target, &destination_path)?;
+        } else if file_type.is_dir() {
+            fs::create_dir_all(&destination_path)?;
+        } else if file_type.is_file() {
+            let mut source_file = File::open(entry.path())?;
+            let mut dest_file = File::create(&destination_path)?;
+            copy_with_progress(&mut source_file, &mut dest_file, &progress_callback)?;
+        }
+    }
+
+    Ok(())
 }

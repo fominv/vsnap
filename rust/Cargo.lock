@@ -1649,6 +1649,9 @@ dependencies = [
 [[package]]
 name = "vsnap-library"
 version = "0.0.0"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "vsnap-runner"
@@ -1656,7 +1659,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "indicatif",
  "rand",
  "serde_json",
  "tar",
