@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
-use tar::{Archive, Builder};
+use tar::{Archive, Builder, EntryType, Header};
 use zstd::{Encoder, stream::read::Decoder};
 
 use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
@@ -34,7 +34,13 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
                 let file_type = entry.file_type();
 
                 if file_type.is_symlink() {
-                    // TODO: Do not follow symlinks
+                    let target = fs::read_link(entry.path())?;
+
+                    let mut header = Header::new_gnu();
+                    header.set_entry_type(EntryType::Symlink);
+                    header.set_size(0);
+
+                    tar_builder.append_link(&mut header, relative_path, target)?;
                 } else if file_type.is_dir() {
                     tar_builder.append_dir(relative_path, entry.path())?;
                 } else if file_type.is_file() {
@@ -57,7 +63,8 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
                 let file_type = entry.file_type();
 
                 if file_type.is_symlink() {
-                    // TODO: Do not follow symlinks
+                    let target = fs::read_link(entry.path())?;
+                    std::os::unix::fs::symlink(&target, &destination_path)?;
                 } else if file_type.is_dir() {
                     fs::create_dir_all(&destination_path)?;
                 } else if file_type.is_file() {
@@ -120,7 +127,8 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
             let file_type = entry.file_type();
 
             if file_type.is_symlink() {
-                // TODO: Do not follow symlinks
+                let target = fs::read_link(entry.path())?;
+                std::os::unix::fs::symlink(target, &destination_path)?;
             } else if file_type.is_dir() {
                 fs::create_dir_all(&destination_path)?;
             } else if file_type.is_file() {
