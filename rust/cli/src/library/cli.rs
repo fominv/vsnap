@@ -8,8 +8,8 @@ use crate::library::{
     docker::{
         create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
         find_snapshot_volume_names, get_snapshot_volume_name, get_volume_sizes_for_volume_names,
-        pull_image, restore_snapshot, snapshot, verify_snapshot_does_not_exist,
-        verify_volume_exists, verify_volume_not_in_use, volume_exists,
+        restore_snapshot, snapshot, verify_snapshot_does_not_exist, verify_volume_exists,
+        verify_volume_not_in_use, volume_exists,
     },
     table::print_snapshot_table,
 };
