@@ -17,7 +17,10 @@ inquire = { version = "0.7.5", default-features = false, features = [
 ] }
 itertools = "0.14.0"
 regex = "1.11.1"
-serde = { version = "1.0.219", features = ["derive"] }
 tabled = { version = "0.18.0", features = ["ansi"] }
-tokio = { version = "1.44.0", features = ["rt-multi-thread", "macros", "io-std"] }
+tokio = { version = "1.44.0", features = [
+    "rt-multi-thread",
+    "macros",
+    "io-std",
+] }
 vsnap-library = { path = "../library" }
