@@ -1,6 +1,8 @@
-use crate::library::snapshot::{restore, snapshot};
-use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
+
+use crate::library::snapshot::{restore, snapshot};
 
 #[derive(Parser)]
 pub struct Cli {
@@ -24,6 +26,12 @@ pub enum Commands {
 }
 
 pub fn run() -> anyhow::Result<()> {
+    if !cfg!(unix) {
+        return Err(anyhow::anyhow!(
+            "This program is only supported on Unix systems"
+        ));
+    }
+
     let args = Cli::parse();
 
     match args.command {
