@@ -6,15 +6,9 @@ pub static VERSION: LazyLock<String> =
     LazyLock::new(|| include_str!("../../../.version").trim().to_string());
 
 #[derive(Serialize, Deserialize)]
-pub struct InProgress {
-    progress: u64,
-    total: u64,
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum ProgressStatus {
-    InProgress(InProgress),
-    Completed,
+pub struct ProgressStatus {
+    pub progress: u64,
+    pub total: u64,
 }
 
 #[derive(Serialize, Deserialize)]

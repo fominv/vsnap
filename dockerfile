@@ -5,7 +5,10 @@ RUN apk add --no-cache musl-dev
 
 WORKDIR /app
 
-COPY ./rust .
+COPY ./rust rust
+COPY .version .
+
+WORKDIR /app/rust
 
 RUN cargo build --release --target=x86_64-unknown-linux-musl -p vsnap-runner 
  
@@ -15,7 +18,7 @@ RUN apk add --no-cache zstd
 
 WORKDIR /app
 
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/vsnap-runner .
+COPY --from=builder /app/rust/target/x86_64-unknown-linux-musl/release/vsnap-runner .
 
 ENV RUST_BACKTRACE=1
 

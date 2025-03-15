@@ -1,26 +1,39 @@
 use std::{
     fs::{self, File},
-    io::{self, Read, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
 use anyhow::Result;
 use tar::{Archive, Builder, EntryType, Header};
+use vsnap_library::{ProgressLog, ProgressStatus};
 use zstd::Encoder;
 
 use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
 
 pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
-    // let total_size = calculate_total_size(source_path)?;
+    let total_size = calculate_total_size(source_path)?;
+    let mut progress = 0;
+
+    let mut progress_callback = |bytes_written: u64| {
+        progress += bytes_written;
+
+        serde_json::to_string(&ProgressLog::SnapshotProgress(ProgressStatus {
+            progress,
+            total: total_size,
+        }))
+        .ok()
+        .map(|x| println!("{}", x));
+    };
 
     match compress {
         true => {
             let tar_file = File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST))?;
-            compress_dir(source_path, tar_file, |x| {})?;
+            compress_dir(source_path, tar_file, progress_callback)?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-            copy_dir(source_path, &files_path, |x| {})?;
+            copy_dir(source_path, &files_path, &mut progress_callback)?;
         }
     }
 
@@ -32,12 +45,43 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
 
     match is_compressed {
         true => {
-            let tar_file = File::open(snapshot_path.join(SNAPSHOT_TAR_ZST))?;
-            decompress_tar(tar_file, restore_path, |x| {})?;
+            let mut tar_file = File::open(snapshot_path.join(SNAPSHOT_TAR_ZST))?;
+
+            let total_size = calculate_total_uncompressed_size(&tar_file)?;
+            let mut progress = 0;
+
+            let progress_callback = |bytes_written: u64| {
+                progress += bytes_written;
+
+                serde_json::to_string(&ProgressLog::RestoreProgress(ProgressStatus {
+                    progress,
+                    total: total_size,
+                }))
+                .ok()
+                .map(|x| println!("{}", x));
+            };
+
+            tar_file.rewind()?;
+            decompress_tar(tar_file, restore_path, progress_callback)?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-            copy_dir(&files_path, restore_path, |x| {})?;
+
+            let total_size = calculate_total_size(&files_path)?;
+            let mut progress = 0;
+
+            let mut progress_callback = |bytes_written: u64| {
+                progress += bytes_written;
+
+                serde_json::to_string(&ProgressLog::RestoreProgress(ProgressStatus {
+                    progress,
+                    total: total_size,
+                }))
+                .ok()
+                .map(|x| println!("{}", x));
+            };
+
+            copy_dir(&files_path, restore_path, &mut progress_callback)?;
         }
     }
 
@@ -56,13 +100,26 @@ fn calculate_total_size(path: &Path) -> Result<u64> {
     Ok(total_size)
 }
 
+fn calculate_total_uncompressed_size(tar_file: &File) -> Result<u64> {
+    let decoder = zstd::Decoder::new(tar_file)?;
+    let mut archive = Archive::new(decoder);
+
+    let total_size = archive
+        .entries()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.header().size().map(|s| s as u64).ok())
+        .sum();
+
+    Ok(total_size)
+}
+
 fn copy_with_progress<R: Read, W: Write, F>(
     reader: &mut R,
     writer: &mut W,
-    progress_callback: &F,
+    progress_callback: &mut F,
 ) -> Result<()>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     let mut buffer = [0; 8192];
 
@@ -82,7 +139,7 @@ where
 
 struct ProgressWriter<W: Write, F>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     inner: W,
     progress_callback: F,
@@ -90,7 +147,7 @@ where
 
 impl<W: Write, F> ProgressWriter<W, F>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     fn new(inner: W, progress_callback: F) -> Self {
         ProgressWriter {
@@ -102,7 +159,7 @@ where
 
 impl<W: Write, F> Write for ProgressWriter<W, F>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let bytes_written = self.inner.write(buf)?;
@@ -119,7 +176,7 @@ where
 
 struct ProgressReader<R: Read, F>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     inner: R,
     progress_callback: F,
@@ -127,7 +184,7 @@ where
 
 impl<R: Read, F> ProgressReader<R, F>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     fn new(inner: R, progress_callback: F) -> Self {
         ProgressReader {
@@ -139,7 +196,7 @@ where
 
 impl<R: Read, F> Read for ProgressReader<R, F>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let bytes_read = self.inner.read(buf)?;
@@ -156,7 +213,7 @@ fn compress_dir<F>(
     progress_callback: F,
 ) -> anyhow::Result<()>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     let buffered_writer = std::io::BufWriter::new(tar_file);
     let mut encoder = Encoder::new(buffered_writer, 0)?.auto_finish();
@@ -199,7 +256,7 @@ fn decompress_tar<F>(
     progress_callback: F,
 ) -> anyhow::Result<()>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     let mut decoder = zstd::Decoder::new(tar_file)?;
     let mut archive = Archive::new(ProgressReader::new(&mut decoder, progress_callback));
@@ -216,10 +273,10 @@ where
 fn copy_dir<F>(
     dir_to_copy: &Path,
     destination_dir: &Path,
-    progress_callback: F,
+    progress_callback: &mut F,
 ) -> anyhow::Result<()>
 where
-    F: Fn(u64),
+    F: FnMut(u64),
 {
     fs::create_dir_all(&destination_dir)?;
 
@@ -238,7 +295,7 @@ where
         } else if file_type.is_file() {
             let mut source_file = File::open(entry.path())?;
             let mut dest_file = File::create(&destination_path)?;
-            copy_with_progress(&mut source_file, &mut dest_file, &progress_callback)?;
+            copy_with_progress(&mut source_file, &mut dest_file, progress_callback)?;
         }
     }
 

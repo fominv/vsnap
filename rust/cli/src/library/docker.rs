@@ -266,7 +266,6 @@ async fn run_command(
                 Some(LogsOptions::<String> {
                     follow: true,
                     stdout: true,
-                    stderr: true,
                     ..Default::default()
                 }),
             )
