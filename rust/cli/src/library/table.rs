@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use console::style;
-use tabled::builder::Builder;
+use tabled::{
+    builder::Builder,
+    settings::{Style, Theme},
+};
 
 use crate::library::docker::{VolumeSize, extract_snapshot_datetime, strip_snapshot_prefix};
 
@@ -44,7 +47,13 @@ pub fn print_snapshot_table(
         builder.push_record(record);
     }
 
-    let table = builder.build();
+    let mut table = builder.build();
+
+    let mut style = Theme::from_style(Style::markdown());
+    style.remove_borders_horizontal();
+
+    table.with(style);
+
     println!("{}", table.to_string());
 
     Ok(())
