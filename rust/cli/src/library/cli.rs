@@ -146,10 +146,7 @@ async fn create(
     )
     .await
     {
-        if volume_exists(&docker, &snapshot_volume_name).await {
-            drop_volume(&docker, &snapshot_volume_name).await?;
-        }
-
+        drop_volume(&docker, &snapshot_volume_name).await.ok();
         return Err(e);
     };
 
