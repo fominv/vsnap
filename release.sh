@@ -11,8 +11,8 @@ set -ue -o pipefail
     cargo release --package vsnap $1
 )
 
-docker build . --tag fominv/vsnap:latest --tag fominv/vsnap:$1
-docker push fominv/vsnap:latest
+docker build . --tag fominv/vsnap:$1
+docker push fominv/vsnap:$1 
 
 (
     cd rust

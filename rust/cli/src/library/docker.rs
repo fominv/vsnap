@@ -12,7 +12,7 @@ use bollard::{
     volume::{CreateVolumeOptions, ListVolumesOptions},
 };
 use chrono::Local;
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use indicatif::ProgressBar;
 use itertools::Itertools;
 
@@ -205,8 +205,9 @@ pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
             None,
             None,
         )
-        .for_each(async |_| {})
-        .await;
+        .try_for_each(async |_| Ok(()))
+        .await
+        .map_err(|_| anyhow!("Failed to pull docker image"))?;
 
     pb.finish_with_message("Done");
 

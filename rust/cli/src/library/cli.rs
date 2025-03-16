@@ -138,13 +138,20 @@ async fn create(
 
     create_volume(&docker, &snapshot_volume_name).await?;
 
-    snapshot(
+    if let Err(e) = snapshot(
         &docker,
         &source_volume_name,
         &snapshot_volume_name,
         compress,
     )
-    .await?;
+    .await
+    {
+        if volume_exists(&docker, &snapshot_volume_name).await {
+            drop_volume(&docker, &snapshot_volume_name).await?;
+        }
+
+        return Err(e);
+    };
 
     Ok(())
 }
