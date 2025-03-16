@@ -2,10 +2,13 @@ services:
   debian:
     image: debian:bookworm-slim
     volumes:
-      - ./dump:/mnt/local
+      - ./dump/mnt:/mnt/local
       - test-volume:/mnt/volume
+      - test-volume2:/mnt/volume2
     command: sh -c "chmod -R 777 /mnt && sleep infinity"
 
 volumes:
   test-volume:
     name: test-volume
+  test-volume2:
+    name: test-volume2

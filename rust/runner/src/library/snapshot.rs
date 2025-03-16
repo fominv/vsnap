@@ -1,7 +1,7 @@
 use std::{
     cmp::min,
     fs::{self, File},
-    io::{self, Read, Seek, Write},
+    io::{self, BufWriter, Read, Seek, Write, stdout},
     path::Path,
 };
 
@@ -12,7 +12,12 @@ use zstd::Encoder;
 
 use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
 
-fn handle_progress(total_size: u64, progress: &mut u64, bytes_written: u64) {
+fn handle_progress(
+    stdout_handle: &mut BufWriter<io::Stdout>,
+    total_size: u64,
+    progress: &mut u64,
+    bytes_written: u64,
+) {
     *progress = min(*progress + bytes_written, total_size);
 
     serde_json::to_string(&Progress {
@@ -20,10 +25,11 @@ fn handle_progress(total_size: u64, progress: &mut u64, bytes_written: u64) {
         total: total_size,
     })
     .ok()
-    .map(|x| println!("{}", x));
+    .map(|x| writeln!(stdout_handle, "{}", x).ok());
 }
 
 pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
+    let mut stdout_handle = BufWriter::new(stdout());
     let total_size = calculate_total_size(source_path)?;
     let mut progress = 0;
 
@@ -31,13 +37,13 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
         true => {
             let tar_file = File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST))?;
             compress_dir(source_path, tar_file, &mut |bytes_written| {
-                handle_progress(total_size, &mut progress, bytes_written)
+                handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
             })?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
             copy_dir(source_path, &files_path, &mut |bytes_written| {
-                handle_progress(total_size, &mut progress, bytes_written)
+                handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
             })?;
         }
     }
@@ -46,28 +52,27 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
 }
 
 pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
+    let mut stdout_handle = BufWriter::new(stdout());
+    let mut progress = 0;
+
     let is_compressed = snapshot_path.join(SNAPSHOT_TAR_ZST).exists();
 
     match is_compressed {
         true => {
             let mut tar_file = File::open(snapshot_path.join(SNAPSHOT_TAR_ZST))?;
-
             let total_size = calculate_total_uncompressed_size(&tar_file)?;
-            let mut progress = 0;
 
             tar_file.rewind()?;
             decompress_tar(tar_file, restore_path, &mut |bytes_written| {
-                handle_progress(total_size, &mut progress, bytes_written)
+                handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
             })?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-
             let total_size = calculate_total_size(&files_path)?;
-            let mut progress = 0;
 
             copy_dir(&files_path, restore_path, &mut |bytes_written| {
-                handle_progress(total_size, &mut progress, bytes_written)
+                handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
             })?;
         }
     }
