@@ -107,19 +107,6 @@ fn calculate_total_size(path: &Path) -> Result<u64> {
     Ok(total_size)
 }
 
-fn calculate_total_uncompressed_size(tar_file: &File) -> Result<u64> {
-    let decoder = zstd::Decoder::new(tar_file)?;
-    let mut archive = Archive::new(decoder);
-
-    let total_size = archive
-        .entries()?
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.header().size().map(|s| s as u64).ok())
-        .sum();
-
-    Ok(total_size)
-}
-
 fn copy_with_progress<R: Read, W: Write, F>(
     reader: &mut R,
     writer: &mut W,
