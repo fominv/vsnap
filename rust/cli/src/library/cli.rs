@@ -2,9 +2,9 @@ use anyhow::anyhow;
 use bollard::Docker;
 use clap::{ArgGroup, Parser, Subcommand};
 use inquire::Confirm;
-use vsnap_library::VERSION;
 
 use crate::library::{
+    constant::VERSION,
     docker::{
         create_volume, drop_volume, find_snapshot_volume_name_by_snapshot_name,
         find_snapshot_volume_names, get_snapshot_volume_name, get_volume_sizes_for_volume_names,

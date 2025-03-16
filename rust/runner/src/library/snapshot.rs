@@ -7,7 +7,7 @@ use std::{
 
 use anyhow::Result;
 use tar::{Archive, Builder, EntryType, Header};
-use vsnap_library::Progress;
+use vsnap::library::Progress;
 use zstd::Encoder;
 
 use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};

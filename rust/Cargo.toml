@@ -1,8 +1,9 @@
 [workspace]
-resolver = "2"
-members = ["cli", "runner", "library"]
+members = ["cli", "runner"]
+resolver = "3"
 
 [profile.release]
 strip = true
 opt-level = "z"
 lto = true
+resolver = "2"

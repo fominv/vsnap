@@ -1645,14 +1645,6 @@ dependencies = [
  "serde_json",
  "tabled",
  "tokio",
- "vsnap-library",
-]
-
-[[package]]
-name = "vsnap-library"
-version = "0.0.0"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -1665,7 +1657,7 @@ dependencies = [
  "serde_json",
  "tar",
  "tempfile",
- "vsnap-library",
+ "vsnap",
  "walkdir",
  "zstd",
 ]

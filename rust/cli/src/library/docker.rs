@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str, sync::LazyLock};
+use std::{collections::HashMap, str};
 
 use anyhow::anyhow;
 use bollard::{
@@ -15,14 +15,12 @@ use chrono::Local;
 use futures::StreamExt;
 use indicatif::ProgressBar;
 use itertools::Itertools;
-use regex::Regex;
-use vsnap_library::{Progress, VERSION};
 
-use crate::library::progress::{create_progress_bar, create_spinner};
-
-pub static SNAPSHOT_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^vsnap-(\d{10,})-").expect("Failed to compile snapshot prefix regex")
-});
+use crate::library::{
+    Progress,
+    constant::{SNAPSHOT_PREFIX_REGEX, VERSION},
+    progress::{create_progress_bar, create_spinner},
+};
 
 pub fn get_snapshot_volume_name(timestamp: i64, name: &str) -> String {
     format!("vsnap-{}-{}", timestamp, name)
