@@ -1,14 +1,18 @@
 use std::{
     cmp::min,
-    fs::{self, File},
-    io::{self, BufWriter, Read, Seek, Write, stdout},
+    io::{Read, Write},
     path::Path,
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
+use async_compression::{Level, tokio::write::ZstdEncoder};
 use tar::{Archive, Builder, EntryType, Header};
+use tokio::{
+    fs::File,
+    io::{self, AsyncWriteExt, BufWriter, Stdout, stdout},
+};
 use vsnap::library::Progress;
-use zstd::Encoder;
+use walkdir::WalkDir;
 
 use crate::library::{
     constant::{SNAPSHOT_METADATA, SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST},
@@ -16,22 +20,22 @@ use crate::library::{
 };
 
 fn handle_progress(
-    stdout_handle: &mut BufWriter<io::Stdout>,
+    stdout_handle: &mut BufWriter<Stdout>,
     total_size: u64,
     progress: &mut u64,
     bytes_written: u64,
 ) {
     *progress = min(*progress + bytes_written, total_size);
 
-    serde_json::to_string(&Progress {
+    serde_json::to_vec(&Progress {
         progress: *progress,
         total: total_size,
     })
     .ok()
-    .map(|x| writeln!(stdout_handle, "{}", x).ok());
+    .map(async |x| stdout_handle.write_all(x.as_ref()).await);
 }
 
-pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
+pub async fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
     let mut stdout_handle = BufWriter::new(stdout());
     let total_size = calculate_total_size(source_path)?;
     let mut progress = 0;
@@ -40,10 +44,11 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
 
     match compress {
         true => {
-            let tar_file = File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST))?;
+            let tar_file = tokio::fs::File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST)).await?;
             compress_dir(source_path, tar_file, &mut |bytes_written| {
                 handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
-            })?;
+            })
+            .await?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
@@ -201,45 +206,67 @@ where
     }
 }
 
-fn compress_dir<F>(
+async fn compress_dir<F>(
     dir_to_compress: &Path,
-    tar_file: File,
+    tar_file: tokio::fs::File,
     progress_callback: F,
 ) -> anyhow::Result<()>
 where
-    F: FnMut(u64),
+    F: FnMut(u64) + Send + 'static,
 {
-    let buffered_writer = std::io::BufWriter::new(tar_file);
-    let mut encoder = Encoder::new(buffered_writer, 0)?.auto_finish();
-    let mut tar_builder = Builder::new(ProgressWriter::new(&mut encoder, progress_callback));
+    // Create buffered async writer
+    let buffered_writer = BufWriter::new(tar_file);
 
-    for entry in walkdir::WalkDir::new(dir_to_compress).follow_links(false) {
-        let entry = entry?;
-        let relative_path = entry.path().strip_prefix(dir_to_compress)?;
+    // Configure Zstd encoder with multithreading
+    let encoder = ZstdEncoder::with_quality(buffered_writer, Level::Default);
 
-        if relative_path == Path::new("") {
-            continue;
+    // Create bridge between async and sync IO
+    let encoder_sync = tokio_util::io::SyncIoBridge::new(encoder);
+
+    // Wrap in progress tracking
+    let progress_writer = ProgressWriter::new(encoder_sync, progress_callback);
+
+    let dir_to_compress = dir_to_compress.to_path_buf();
+
+    // Process files in blocking task
+    tokio::task::spawn_blocking(move || {
+        let mut tar_builder = Builder::new(progress_writer);
+
+        for entry in WalkDir::new(&dir_to_compress)
+            .follow_links(false)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            let relative_path = entry.path().strip_prefix(&dir_to_compress)?;
+
+            if relative_path == Path::new("") {
+                continue;
+            }
+
+            let file_type = entry.file_type();
+
+            if file_type.is_symlink() {
+                let target = std::fs::read_link(entry.path())?;
+
+                let mut header = Header::new_gnu();
+                header.set_entry_type(EntryType::Symlink);
+                header.set_size(0);
+
+                tar_builder.append_link(&mut header, relative_path, &target)?;
+            } else if file_type.is_dir() {
+                tar_builder.append_dir(relative_path, entry.path())?;
+            } else if file_type.is_file() {
+                let mut file = std::fs::File::open(entry.path())?;
+                tar_builder.append_file(relative_path, &mut file)?;
+            }
         }
 
-        let file_type = entry.file_type();
+        tar_builder.finish()?;
 
-        if file_type.is_symlink() {
-            let target = fs::read_link(entry.path())?;
-
-            let mut header = Header::new_gnu();
-            header.set_entry_type(EntryType::Symlink);
-            header.set_size(0);
-
-            tar_builder.append_link(&mut header, relative_path, target)?;
-        } else if file_type.is_dir() {
-            tar_builder.append_dir(relative_path, entry.path())?;
-        } else if file_type.is_file() {
-            let mut file = File::open(entry.path())?;
-            tar_builder.append_file(relative_path, &mut file)?;
-        }
-    }
-
-    tar_builder.finish()?;
+        Ok::<(), anyhow::Error>(())
+    })
+    .await
+    .map_err(|_| anyhow!("Error during tar file creation"))??;
 
     Ok(())
 }
