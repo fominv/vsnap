@@ -1641,6 +1641,8 @@ dependencies = [
  "inquire",
  "itertools",
  "regex",
+ "serde",
+ "serde_json",
  "tabled",
  "tokio",
  "vsnap-library",

@@ -1,4 +1,5 @@
 use std::{
+    cmp::min,
     fs::{self, File},
     io::{self, Read, Seek, Write},
     path::Path,
@@ -6,34 +7,38 @@ use std::{
 
 use anyhow::Result;
 use tar::{Archive, Builder, EntryType, Header};
-use vsnap_library::{ProgressLog, ProgressStatus};
+use vsnap_library::Progress;
 use zstd::Encoder;
 
 use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
+
+fn handle_progress(total_size: u64, progress: &mut u64, bytes_written: u64) {
+    *progress = min(*progress + bytes_written, total_size);
+
+    serde_json::to_string(&Progress {
+        progress: *progress,
+        total: total_size,
+    })
+    .ok()
+    .map(|x| println!("{}", x));
+}
 
 pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Result<()> {
     let total_size = calculate_total_size(source_path)?;
     let mut progress = 0;
 
-    let mut progress_callback = |bytes_written: u64| {
-        progress += bytes_written;
-
-        serde_json::to_string(&ProgressLog::SnapshotProgress(ProgressStatus {
-            progress,
-            total: total_size,
-        }))
-        .ok()
-        .map(|x| println!("{}", x));
-    };
-
     match compress {
         true => {
             let tar_file = File::create(&snapshot_path.join(SNAPSHOT_TAR_ZST))?;
-            compress_dir(source_path, tar_file, progress_callback)?;
+            compress_dir(source_path, tar_file, &mut |bytes_written| {
+                handle_progress(total_size, &mut progress, bytes_written)
+            })?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-            copy_dir(source_path, &files_path, &mut progress_callback)?;
+            copy_dir(source_path, &files_path, &mut |bytes_written| {
+                handle_progress(total_size, &mut progress, bytes_written)
+            })?;
         }
     }
 
@@ -50,19 +55,10 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
             let total_size = calculate_total_uncompressed_size(&tar_file)?;
             let mut progress = 0;
 
-            let progress_callback = |bytes_written: u64| {
-                progress += bytes_written;
-
-                serde_json::to_string(&ProgressLog::RestoreProgress(ProgressStatus {
-                    progress,
-                    total: total_size,
-                }))
-                .ok()
-                .map(|x| println!("{}", x));
-            };
-
             tar_file.rewind()?;
-            decompress_tar(tar_file, restore_path, progress_callback)?;
+            decompress_tar(tar_file, restore_path, &mut |bytes_written| {
+                handle_progress(total_size, &mut progress, bytes_written)
+            })?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
@@ -70,18 +66,9 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
             let total_size = calculate_total_size(&files_path)?;
             let mut progress = 0;
 
-            let mut progress_callback = |bytes_written: u64| {
-                progress += bytes_written;
-
-                serde_json::to_string(&ProgressLog::RestoreProgress(ProgressStatus {
-                    progress,
-                    total: total_size,
-                }))
-                .ok()
-                .map(|x| println!("{}", x));
-            };
-
-            copy_dir(&files_path, restore_path, &mut progress_callback)?;
+            copy_dir(&files_path, restore_path, &mut |bytes_written| {
+                handle_progress(total_size, &mut progress, bytes_written)
+            })?;
         }
     }
 

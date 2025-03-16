@@ -1,11 +1,11 @@
-use std::{collections::HashMap, str, sync::LazyLock, time::Duration};
+use std::{collections::HashMap, str, sync::LazyLock};
 
 use anyhow::anyhow;
 use bollard::{
     Docker,
     container::{
-        Config, CreateContainerOptions, ListContainersOptions, LogsOptions, StartContainerOptions,
-        WaitContainerOptions,
+        Config, CreateContainerOptions, ListContainersOptions, LogOutput, LogsOptions,
+        StartContainerOptions, WaitContainerOptions,
     },
     image::CreateImageOptions,
     secret::{HostConfig, Mount},
@@ -13,11 +13,12 @@ use bollard::{
 };
 use chrono::Local;
 use futures::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
 use itertools::Itertools;
 use regex::Regex;
-use tokio::io::{self, AsyncWriteExt};
-use vsnap_library::VERSION;
+use vsnap_library::{Progress, VERSION};
+
+use crate::library::progress::{create_progress_bar, create_spinner};
 
 pub static SNAPSHOT_PREFIX_REGEX: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^vsnap-(\d{10,})-").expect("Failed to compile snapshot prefix regex")
@@ -195,20 +196,7 @@ pub async fn image_exists(docker: &Docker, image: &str) -> bool {
 }
 
 pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
-    let pb = ProgressBar::new_spinner();
-    pb.set_message("Downloading & Extracting Image...");
-    pb.enable_steady_tick(Duration::from_millis(120));
-    pb.set_style(
-        ProgressStyle::with_template("{spinner:.green} {msg}")?.tick_strings(&[
-            "▹▹▹▹▹",
-            "▸▹▹▹▹",
-            "▹▸▹▹▹",
-            "▹▹▸▹▹",
-            "▹▹▹▸▹",
-            "▹▹▹▹▸",
-            "▪▪▪▪▪",
-        ]),
-    );
+    let pb = create_spinner("Downloading & Extracting Image...".to_string())?;
 
     docker
         .create_image(
@@ -227,6 +215,32 @@ pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
     pb.finish_with_message("Done");
 
     Ok(())
+}
+
+async fn handle_progress(
+    log: Result<LogOutput, bollard::errors::Error>,
+    progress_bar: &ProgressBar,
+) {
+    match log {
+        Ok(bollard::container::LogOutput::StdOut { message }) => {
+            let progress: Option<Progress> = serde_json::from_slice(&message).ok();
+
+            if let Some(progress) = progress {
+                progress_bar.length().map(|len| {
+                    if len != progress.total as u64 {
+                        progress_bar.set_length(progress.total as u64);
+                    }
+                });
+
+                progress_bar.set_position(progress.progress);
+
+                if progress.progress == progress.total {
+                    progress_bar.finish();
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 async fn run_command(
@@ -260,6 +274,8 @@ async fn run_command(
             .start_container(&container_name, None::<StartContainerOptions<String>>)
             .await?;
 
+        let progress_bar = create_progress_bar(0)?;
+
         docker
             .logs(
                 &container_name,
@@ -269,19 +285,7 @@ async fn run_command(
                     ..Default::default()
                 }),
             )
-            .for_each(async |v| {
-                if let Ok(v) = v {
-                    match v {
-                        bollard::container::LogOutput::StdOut { message } => {
-                            io::stdout().write_all(&message).await.ok();
-                        }
-                        bollard::container::LogOutput::StdErr { message } => {
-                            io::stderr().write_all(&message).await.ok();
-                        }
-                        _ => {}
-                    }
-                }
-            })
+            .for_each(async |log| handle_progress(log, &progress_bar).await)
             .await;
 
         docker
@@ -293,12 +297,12 @@ async fn run_command(
     })()
     .await
     {
-        result => {
-            docker.remove_container(&container_name, None).await?;
-
-            result
+        _ => {
+            docker.remove_container(&container_name, None).await.ok();
         }
     }
+
+    Ok(())
 }
 
 pub async fn snapshot(
