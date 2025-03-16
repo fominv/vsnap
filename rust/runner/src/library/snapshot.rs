@@ -10,7 +10,10 @@ use tar::{Archive, Builder, EntryType, Header};
 use vsnap::library::Progress;
 use zstd::Encoder;
 
-use crate::library::constant::{SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST};
+use crate::library::{
+    constant::{SNAPSHOT_METADATA, SNAPSHOT_SUB_DIR, SNAPSHOT_TAR_ZST},
+    metadata::SnapshotMetadata,
+};
 
 fn handle_progress(
     stdout_handle: &mut BufWriter<io::Stdout>,
@@ -32,6 +35,8 @@ pub fn snapshot(source_path: &Path, snapshot_path: &Path, compress: bool) -> Res
     let mut stdout_handle = BufWriter::new(stdout());
     let total_size = calculate_total_size(source_path)?;
     let mut progress = 0;
+
+    SnapshotMetadata::new(total_size).write(&snapshot_path.join(SNAPSHOT_METADATA))?;
 
     match compress {
         true => {
@@ -55,24 +60,34 @@ pub fn restore(snapshot_path: &Path, restore_path: &Path) -> Result<()> {
     let mut stdout_handle = BufWriter::new(stdout());
     let mut progress = 0;
 
+    let metadata = SnapshotMetadata::read(&snapshot_path.join(SNAPSHOT_METADATA))?;
+
     let is_compressed = snapshot_path.join(SNAPSHOT_TAR_ZST).exists();
 
     match is_compressed {
         true => {
             let mut tar_file = File::open(snapshot_path.join(SNAPSHOT_TAR_ZST))?;
-            let total_size = calculate_total_uncompressed_size(&tar_file)?;
 
             tar_file.rewind()?;
             decompress_tar(tar_file, restore_path, &mut |bytes_written| {
-                handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
+                handle_progress(
+                    &mut stdout_handle,
+                    metadata.total_size,
+                    &mut progress,
+                    bytes_written,
+                )
             })?;
         }
         false => {
             let files_path = snapshot_path.join(SNAPSHOT_SUB_DIR);
-            let total_size = calculate_total_size(&files_path)?;
 
             copy_dir(&files_path, restore_path, &mut |bytes_written| {
-                handle_progress(&mut stdout_handle, total_size, &mut progress, bytes_written)
+                handle_progress(
+                    &mut stdout_handle,
+                    metadata.total_size,
+                    &mut progress,
+                    bytes_written,
+                )
             })?;
         }
     }
