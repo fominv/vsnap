@@ -6,7 +6,6 @@ RUN apk add --no-cache musl-dev
 WORKDIR /app
 
 COPY ./rust rust
-COPY .version .
 
 WORKDIR /app/rust
 
