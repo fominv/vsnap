@@ -102,8 +102,8 @@ fn compare_directories(dir1: &Path, dir2: &Path) -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_snapshot_restore_uncompressed() -> Result<()> {
+#[tokio::test]
+async fn test_snapshot_restore_uncompressed() -> Result<()> {
     let source_dir = tempdir()?;
     let snapshot_dir = tempdir()?;
     let target_dir = tempdir()?;
@@ -112,16 +112,16 @@ fn test_snapshot_restore_uncompressed() -> Result<()> {
 
     create_random_files(source_dir.path(), 5, 3, &mut rng)?;
 
-    snapshot(source_dir.path(), snapshot_dir.path(), false)?;
-    restore(snapshot_dir.path(), target_dir.path())?;
+    snapshot(source_dir.path(), snapshot_dir.path(), false).await?;
+    restore(snapshot_dir.path(), target_dir.path()).await?;
 
     compare_directories(source_dir.path(), target_dir.path())?;
 
     Ok(())
 }
 
-#[test]
-fn test_snapshot_restore_compressed() -> Result<()> {
+#[tokio::test]
+async fn test_snapshot_restore_compressed() -> Result<()> {
     let source_dir = tempdir()?;
     let snapshot_dir = tempdir()?;
     let target_dir = tempdir()?;
@@ -130,68 +130,68 @@ fn test_snapshot_restore_compressed() -> Result<()> {
 
     create_random_files(source_dir.path(), 5, 3, &mut rng)?;
 
-    snapshot(source_dir.path(), snapshot_dir.path(), true)?;
-    restore(snapshot_dir.path(), target_dir.path())?;
+    snapshot(source_dir.path(), snapshot_dir.path(), true).await?;
+    restore(snapshot_dir.path(), target_dir.path()).await?;
 
     compare_directories(source_dir.path(), target_dir.path())?;
 
     Ok(())
 }
 
-#[test]
-fn test_snapshot_restore_empty_dir_uncompressed() -> Result<()> {
+#[tokio::test]
+async fn test_snapshot_restore_empty_dir_uncompressed() -> Result<()> {
     let source_dir = tempdir()?;
     let snapshot_dir = tempdir()?;
     let target_dir = tempdir()?;
 
     fs::create_dir_all(source_dir.path().join("empty_dir"))?;
 
-    snapshot(source_dir.path(), snapshot_dir.path(), false)?;
-    restore(snapshot_dir.path(), target_dir.path())?;
+    snapshot(source_dir.path(), snapshot_dir.path(), false).await?;
+    restore(snapshot_dir.path(), target_dir.path()).await?;
 
     compare_directories(source_dir.path(), target_dir.path())?;
 
     Ok(())
 }
 
-#[test]
-fn test_snapshot_restore_empty_dir_compressed() -> Result<()> {
+#[tokio::test]
+async fn test_snapshot_restore_empty_dir_compressed() -> Result<()> {
     let source_dir = tempdir()?;
     let snapshot_dir = tempdir()?;
     let target_dir = tempdir()?;
 
     fs::create_dir_all(source_dir.path().join("empty_dir"))?;
 
-    snapshot(source_dir.path(), snapshot_dir.path(), true)?;
-    restore(snapshot_dir.path(), target_dir.path())?;
+    snapshot(source_dir.path(), snapshot_dir.path(), true).await?;
+    restore(snapshot_dir.path(), target_dir.path()).await?;
 
     compare_directories(source_dir.path(), target_dir.path())?;
 
     Ok(())
 }
 
-#[test]
-fn test_snapshot_restore_no_files_uncompressed() -> Result<()> {
+#[tokio::test]
+async fn test_snapshot_restore_no_files_uncompressed() -> Result<()> {
     let source_dir = tempdir()?;
     let snapshot_dir = tempdir()?;
     let target_dir = tempdir()?;
 
-    snapshot(source_dir.path(), snapshot_dir.path(), false)?;
-    restore(snapshot_dir.path(), target_dir.path())?;
+    snapshot(source_dir.path(), snapshot_dir.path(), false).await?;
+    restore(snapshot_dir.path(), target_dir.path()).await?;
 
     compare_directories(source_dir.path(), target_dir.path())?;
 
     Ok(())
 }
 
-#[test]
-fn test_snapshot_restore_no_files_compressed() -> Result<()> {
+#[tokio::test]
+async fn test_snapshot_restore_no_files_compressed() -> Result<()> {
     let source_dir = tempdir()?;
     let snapshot_dir = tempdir()?;
     let target_dir = tempdir()?;
 
-    snapshot(source_dir.path(), snapshot_dir.path(), true)?;
-    restore(snapshot_dir.path(), target_dir.path())?;
+    snapshot(source_dir.path(), snapshot_dir.path(), true).await?;
+    restore(snapshot_dir.path(), target_dir.path()).await?;
 
     compare_directories(source_dir.path(), target_dir.path())?;
 

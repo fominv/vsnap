@@ -17,3 +17,4 @@ tokio = { version = "1.44.1", features = ["fs", "io-std", "io-util", "rt-multi-t
 async-compression = { version = "0.4.21", features = ["tokio", "zstd"] }
 tokio-util = { version = "0.7.14", features = ["io", "io-util"] }
 astral-tokio-tar = "0.5.1"
+futures-util = "0.3.31"
