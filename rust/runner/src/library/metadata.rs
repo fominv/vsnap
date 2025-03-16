@@ -1,6 +1,5 @@
-use std::fs;
-
 use serde::{Deserialize, Serialize};
+use tokio::fs;
 
 #[derive(Serialize, Deserialize)]
 pub struct SnapshotMetadata {
@@ -12,14 +11,14 @@ impl SnapshotMetadata {
         SnapshotMetadata { total_size }
     }
 
-    pub fn write(&self, path: &std::path::Path) -> anyhow::Result<()> {
-        fs::write(path, serde_json::to_string(self)?)?;
+    pub async fn write(&self, path: &std::path::Path) -> anyhow::Result<()> {
+        fs::write(path, serde_json::to_string(self)?).await?;
 
         Ok(())
     }
 
-    pub fn read(path: &std::path::Path) -> anyhow::Result<Self> {
-        let content = fs::read_to_string(path)?;
+    pub async fn read(path: &std::path::Path) -> anyhow::Result<Self> {
+        let content = fs::read_to_string(path).await?;
 
         Ok(serde_json::from_str(&content)?)
     }

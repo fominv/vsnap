@@ -25,7 +25,7 @@ pub enum Commands {
     },
 }
 
-pub fn run() -> anyhow::Result<()> {
+pub async fn run() -> anyhow::Result<()> {
     if !cfg!(unix) {
         return Err(anyhow::anyhow!(
             "This program is only supported on Unix systems"
@@ -39,11 +39,11 @@ pub fn run() -> anyhow::Result<()> {
             compress,
             source_path,
             snapshot_path,
-        } => snapshot(&source_path, &snapshot_path, compress)?,
+        } => snapshot(&source_path, &snapshot_path, compress).await?,
         Commands::Restore {
             snapshot_path,
             restore_path,
-        } => restore(&snapshot_path, &restore_path)?,
+        } => restore(&snapshot_path, &restore_path).await?,
     }
 
     Ok(())
