@@ -2,8 +2,7 @@ use std::sync::LazyLock;
 
 use serde::{Deserialize, Serialize};
 
-pub static VERSION: LazyLock<String> =
-    LazyLock::new(|| include_str!("../../../.version").trim().to_string());
+pub static VERSION: LazyLock<String> = LazyLock::new(|| env!("CARGO_PKG_VERSION").to_string());
 
 #[derive(Serialize, Deserialize)]
 pub struct Progress {
