@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, str, sync::LazyLock};
+use std::{collections::HashMap, str, sync::LazyLock};
 
 use anyhow::anyhow;
 use bollard::{
@@ -16,7 +16,6 @@ use futures::StreamExt;
 use indicatif::ProgressBar;
 use itertools::Itertools;
 use regex::Regex;
-use tokio::io::{BufWriter, stdout};
 use vsnap_library::{Progress, VERSION};
 
 use crate::library::progress::{create_progress_bar, create_spinner};
@@ -198,7 +197,6 @@ pub async fn image_exists(docker: &Docker, image: &str) -> bool {
 
 pub async fn pull_image(docker: &Docker, image: &str) -> anyhow::Result<()> {
     let pb = create_spinner("Downloading & Extracting Image...".to_string())?;
-    let mut handle = BufWriter::new(stdout);
 
     docker
         .create_image(
