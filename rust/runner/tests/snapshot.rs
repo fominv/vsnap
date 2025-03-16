@@ -1,6 +1,7 @@
+use std::{fs, path::Path};
+
 use anyhow::Result;
 use rand::{Rng, SeedableRng, distr::Alphanumeric, rngs::StdRng};
-use std::{fs, path::Path};
 use tempfile::tempdir;
 use vsnap_runner::library::snapshot::{restore, snapshot};
 use walkdir::WalkDir;

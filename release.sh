@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 
-cargo check
-cargo test
-cargo fmt -- --check
+set -ue -o pipefail
 
-cargo release version --execute $1
+(
+    cd rust
+    cargo fmt -- --check
+    cargo check
+    cargo test
+
+    cargo release --package vsnap $1
+)
 
 docker build . --tag fominv/vsnap:latest --tag fominv/vsnap:$1
-cargo release --package vsnap $1
-
 docker push fominv/vsnap:latest
-cargo release --execute --package vsnap $1 
+
+(
+    cd rust
+    cargo release --execute --package vsnap $1
+)
