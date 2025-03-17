@@ -38,6 +38,14 @@ pub async fn verify_volume_not_in_use(docker: &Docker, volume_name: &str) -> any
     let container_names = containers
         .iter()
         .filter_map(|container| {
+            if container
+                .state
+                .as_ref()
+                .map_or(false, |state| state == "exited")
+            {
+                return None;
+            }
+
             container
                 .names
                 .iter()
