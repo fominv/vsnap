@@ -8,7 +8,7 @@ use async_compression::{
 use futures_util::TryStreamExt;
 use tokio::{
     fs::File,
-    io::BufStream,
+    io::{AsyncWriteExt, BufReader, BufStream, BufWriter},
     sync::mpsc::{self, Sender},
 };
 use tokio_tar::Builder;
@@ -88,13 +88,15 @@ async fn compress_dir(
     tar_file: tokio::fs::File,
     sender: Sender<u64>,
 ) -> anyhow::Result<()> {
-    let buffered_stream = BufStream::new(tar_file);
-    let encoder = ZstdEncoder::with_quality(buffered_stream, Level::Default);
-    let progress_writer = AsyncProgressReaderWriter::new(encoder, sender);
+    let buffered_writer = BufWriter::new(tar_file);
+    let encoder = ZstdEncoder::with_quality(buffered_writer, Level::Default);
+    let progress_reporter = AsyncProgressReaderWriter::new(encoder, sender);
 
-    let mut archive = Builder::new(progress_writer);
-    archive.append_dir_all("", dir_to_compress).await?;
-    archive.finish().await?;
+    let mut archive = Builder::new(progress_reporter);
+    archive.append_dir_all("./", dir_to_compress).await?;
+
+    let mut encoder = archive.into_inner().await?;
+    encoder.shutdown().await?;
 
     Ok(())
 }
@@ -104,13 +106,11 @@ async fn decompress_dir(
     restore_path: &Path,
     sender: Sender<u64>,
 ) -> anyhow::Result<()> {
-    let buffered_stream = BufStream::new(tar_file);
-    let decoder = ZstdDecoder::new(buffered_stream);
+    let buffered_reader = BufReader::new(tar_file);
+    let decoder = ZstdDecoder::new(buffered_reader);
+    let progress_reporter = AsyncProgressReaderWriter::new(decoder, sender);
 
-    let progress_writer = AsyncProgressReaderWriter::new(decoder, sender);
-    let mut archive = tokio_tar::Archive::new(progress_writer);
-
-    // TODO: Fix poll_skip in astral-tokio-tar and remove ok() here.
+    let mut archive = tokio_tar::Archive::new(progress_reporter);
     archive
         .entries()?
         .try_for_each(async |mut entry| {
@@ -119,20 +119,21 @@ async fn decompress_dir(
 
             Ok(())
         })
-        .await
-        .ok();
+        .await?;
 
     Ok(())
 }
 
 async fn tar_dir(dir: &Path, tar_file: tokio::fs::File, sender: Sender<u64>) -> anyhow::Result<()> {
-    let buffered_stream = BufStream::new(tar_file);
-    let progress_writer = AsyncProgressReaderWriter::new(buffered_stream, sender);
+    let buffered_writer = BufWriter::new(tar_file);
+    let progress_reporter = AsyncProgressReaderWriter::new(buffered_writer, sender);
 
-    let mut archive = Builder::new(progress_writer);
+    let mut archive = Builder::new(progress_reporter);
 
-    archive.append_dir_all("", dir).await?;
-    archive.finish().await?;
+    archive.append_dir_all("./", dir).await?;
+
+    let mut encoder = archive.into_inner().await?;
+    encoder.shutdown().await?;
 
     Ok(())
 }
@@ -142,12 +143,11 @@ async fn untar_dir(
     restore_path: &Path,
     sender: Sender<u64>,
 ) -> anyhow::Result<()> {
-    let buffered_stream = BufStream::new(tar_file);
-    let progress_writer = AsyncProgressReaderWriter::new(buffered_stream, sender);
+    let buffered_reader = BufStream::new(tar_file);
+    let progress_reporter = AsyncProgressReaderWriter::new(buffered_reader, sender);
 
-    let mut archive = tokio_tar::Archive::new(progress_writer);
+    let mut archive = tokio_tar::Archive::new(progress_reporter);
 
-    // TODO: Fix poll_skip in astral-tokio-tar and remove ok() here.
     archive
         .entries()?
         .try_for_each(async |mut entry| {
@@ -156,8 +156,7 @@ async fn untar_dir(
 
             Ok(())
         })
-        .await
-        .ok();
+        .await?;
 
     Ok(())
 }

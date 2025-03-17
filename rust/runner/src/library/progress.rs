@@ -6,7 +6,7 @@ use std::{
 
 use anyhow::Result;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt, BufWriter, ReadBuf, Stdout, stdout},
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf, Stdout, stdout},
     sync::mpsc::{Receiver, Sender},
 };
 use vsnap::library::Progress;
@@ -84,7 +84,7 @@ impl<W: AsyncRead + Unpin> AsyncRead for AsyncProgressReaderWriter<W> {
 }
 
 pub struct ProgressReporter {
-    stdout_handle: BufWriter<Stdout>,
+    stdout: Stdout,
     receiver: Receiver<u64>,
     total_size: u64,
     progress: u64,
@@ -92,10 +92,8 @@ pub struct ProgressReporter {
 
 impl ProgressReporter {
     pub fn new(receiver: Receiver<u64>, total_size: u64) -> Self {
-        let stdout_handle = BufWriter::new(stdout());
-
         Self {
-            stdout_handle,
+            stdout: stdout(),
             receiver,
             total_size,
             progress: 0,
@@ -107,12 +105,19 @@ impl ProgressReporter {
             while let Some(bytes_written) = self.receiver.recv().await {
                 self.progress = min(self.progress + bytes_written, self.total_size);
 
-                serde_json::to_vec(&Progress {
+                let mut output = match serde_json::to_vec(&Progress {
                     progress: self.progress,
                     total: self.total_size,
-                })
-                .ok()
-                .map(async |x| self.stdout_handle.write_all(x.as_ref()).await);
+                }) {
+                    Ok(output) => output,
+                    Err(_) => {
+                        continue;
+                    }
+                };
+
+                output.push(b'\n');
+
+                self.stdout.write_all(&output).await.ok();
             }
         });
     }
