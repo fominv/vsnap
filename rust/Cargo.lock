@@ -1709,7 +1709,6 @@ dependencies = [
  "tar",
  "tempfile",
  "tokio",
- "tokio-util",
  "vsnap",
  "walkdir",
 ]

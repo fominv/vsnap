@@ -5,6 +5,7 @@ use async_compression::{
     Level,
     tokio::{bufread::ZstdDecoder, write::ZstdEncoder},
 };
+use futures_util::TryStreamExt;
 use tokio::{
     fs::File,
     io::BufStream,
@@ -92,7 +93,7 @@ async fn compress_dir(
     let progress_writer = AsyncProgressReaderWriter::new(encoder, sender);
 
     let mut archive = Builder::new(progress_writer);
-    archive.append_dir_all(".", dir_to_compress).await?;
+    archive.append_dir_all("", dir_to_compress).await?;
     archive.finish().await?;
 
     Ok(())
@@ -108,7 +109,18 @@ async fn decompress_dir(
 
     let progress_writer = AsyncProgressReaderWriter::new(decoder, sender);
     let mut archive = tokio_tar::Archive::new(progress_writer);
-    archive.unpack(restore_path).await?;
+
+    // TODO: Fix poll_skip in astral-tokio-tar and remove ok() here.
+    archive
+        .entries()?
+        .try_for_each(async |mut entry| {
+            let path = restore_path.join(entry.path()?);
+            entry.unpack(path).await?;
+
+            Ok(())
+        })
+        .await
+        .ok();
 
     Ok(())
 }
@@ -119,7 +131,7 @@ async fn tar_dir(dir: &Path, tar_file: tokio::fs::File, sender: Sender<u64>) -> 
 
     let mut archive = Builder::new(progress_writer);
 
-    archive.append_dir_all(".", dir).await?;
+    archive.append_dir_all("", dir).await?;
     archive.finish().await?;
 
     Ok(())
@@ -134,7 +146,18 @@ async fn untar_dir(
     let progress_writer = AsyncProgressReaderWriter::new(buffered_stream, sender);
 
     let mut archive = tokio_tar::Archive::new(progress_writer);
-    archive.unpack(restore_path).await?;
+
+    // TODO: Fix poll_skip in astral-tokio-tar and remove ok() here.
+    archive
+        .entries()?
+        .try_for_each(async |mut entry| {
+            let path = restore_path.join(entry.path()?);
+            entry.unpack(path).await?;
+
+            Ok(())
+        })
+        .await
+        .ok();
 
     Ok(())
 }
