@@ -4,7 +4,7 @@
 [crates-badge]: https://img.shields.io/crates/v/vsnap.svg
 [crates-url]: https://crates.io/crates/vsnap
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
-[mit-url]: https://github.com/tokio-rs/tokio/blob/master/LICENSE
+[mit-url]: https://github.com/fominv/vsnap/blob/master/LICENSE
 
 # vsnap
 
