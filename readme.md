@@ -8,7 +8,7 @@
 
 # vsnap
 
-A command line utility to snapshot & restore docker volumes. 
+**A command line utility to snapshot & restore docker volumes.**
 
 Useful during development for resetting database migrations and other similar use cases.
 
