@@ -10,7 +10,8 @@
 
 **A command line utility to snapshot & restore docker volumes.**
 
-Useful during development for resetting database migrations and other similar use cases.
+Useful during development for resetting database migrations, 
+but also applicable for restoring the state of general Docker volumes.
 
 *Note: This is not intended as a backup solution.*
 
