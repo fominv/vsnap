@@ -25,7 +25,7 @@ vsnap --help
 vsnap create source-volume snapshot-a
 
 # Optionally with compression
-vsnap create --compression source-volume snapshot-b
+vsnap create --compress source-volume snapshot-b
 
 # Restore
 vsnap restore snapshot-a new-volume
